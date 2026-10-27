@@ -2,6 +2,8 @@
 GPU particle engine for Delphi 10+ using Raylib with OpenGL 4.3+ compute shaders. Hundreds of thousands to millions of particles, fully simulated on the GPU — zero per-particle CPU work after initialisation.     
     
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LaMitaOne/Yutani-GPU-Particles)    
+      
+Sample video:  https://youtu.be/QT0Lkt7IVJI      
      
  on ryzen4500u was around 2,7m still fine at 60fps, rtx does a bit more...       
 <img width="1391" height="745" alt="Unbenannt" src="https://github.com/user-attachments/assets/8770d1bb-cc25-4aa1-91fd-9de1dd8c3f8a" />
