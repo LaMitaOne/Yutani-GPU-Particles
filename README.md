@@ -15,21 +15,19 @@ Features
     Instanced triangle rendering — one instanced draw call renders every visible particle as a small camera-facing arrow that points along its velocity vector. Vertex color comes from velocity direction (rainbow) or per-element fixed colors (Stickman Scene).
     12 show modes — switchable at runtime via ComboBox:
 
-Mode
-	
-Description
-Lorenz	Chaotic Lorenz attractor (sigma/rho/beta adjustable)
-Cube	Particles lerp into a 3D cube surface
-Sphere	Fibonacci sphere distribution + slow rotation
-Wave	3D sine-wave motion field
-Galaxy	Keplerian orbital motion with spiral-arm wobble
-Fountain	Gravity-driven fountain with floor bounce + respawn
-Vortex	Tornado swirl, faster toward center
-DNA Helix	Double-helix strand with rotation
-Black Hole	Gravity well + tangential orbit + respawn at edge
-Explode	Oscillating expand/collapse shell
-Flow Field	Curl-noise approximation with wrap-around
-Stickman Scene	3D diorama: sun, house with roof, trees, street, flowers, walking stickman — each element in its own color
+Modes:   
+Lorenz	Chaotic Lorenz attractor (sigma/rho/beta adjustable)    
+Cube	Particles lerp into a 3D cube surface    
+Sphere	Fibonacci sphere distribution + slow rotation    
+Wave	3D sine-wave motion field    
+Galaxy	Keplerian orbital motion with spiral-arm wobble    
+Fountain	Gravity-driven fountain with floor bounce + respawn        
+Vortex	Tornado swirl, faster toward center    
+DNA Helix	Double-helix strand with rotation    
+Black Hole	Gravity well + tangential orbit + respawn at edge    
+Explode	Oscillating expand/collapse shell    
+Flow Field	Curl-noise approximation with wrap-around    
+Stickman Scene	3D diorama: sun, house with roof, trees, street, flowers, walking stickman — each element in its own color    
  
     Smooth mode transitions — switching modes does not snap. Form modes use mix(pos, target, rate) to lerp particles from their current positions to the new pattern. Motion modes take over from current pos/vel directly.
     Mouse interaction — hold left mouse button in the render window to push nearby particles away from the cursor. Screen-to-world conversion is done manually via camera vectors (no GetMouseRay dependency).
