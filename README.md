@@ -53,3 +53,6 @@ Requirements
      Delphi 10.3 Rio or newer (tested on Delphi 12 / dcc64)
      Raylib bindings for Delphi (ray4delphi or equivalent)
      OpenGL 4.3+ capable GPU (compute shaders + SSBOs)
+      
+     
+Part of Yutani https://github.com/LaMitaOne/Yutani-Building-better-worlds     
