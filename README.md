@@ -39,14 +39,6 @@ Stickman Scene	3D diorama: sun, house with roof, trees, street, flowers, walking
     Embedded shader sources — all GLSL is embedded as AnsiString constants. No external shader files, no file IO, no path issues.
     No third-party dependencies — only requires Raylib (which you already have). No additional Delphi packages, no NuGet, no installers.
 
-Files
-File
-	
-Purpose
-Yutani.Render.Particles.GPU.pas	GPU particle engine (compute + render shaders, SSBOs, VAO)
-uParticleEngine.pas	Threaded VCL/Raylib wrapper (frame pacing, camera, mouse push)
-Unit1.pas	VCL form with all controls (trackbars, ComboBox, buttons, labels)
- 
  
 Requirements
 
