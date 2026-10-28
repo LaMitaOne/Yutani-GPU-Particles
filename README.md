@@ -13,7 +13,7 @@ Features
 
     GPU compute shader physics — all particle positions and velocities are evolved on the GPU via a compute shader writing to SSBOs. No CPU round-trip per frame, no per-particle loop on the host.
     Instanced triangle rendering — one instanced draw call renders every visible particle as a small camera-facing arrow that points along its velocity vector. Vertex color comes from velocity direction (rainbow) or per-element fixed colors (Stickman Scene).
-    12 show modes — switchable at runtime via ComboBox:
+    11 show modes — switchable at runtime via ComboBox:
 
 Modes:   
 Lorenz	Chaotic Lorenz attractor (sigma/rho/beta adjustable)    
@@ -43,7 +43,7 @@ Stickman Scene	3D diorama: sun, house with roof, trees, street, flowers, walking
 Requirements
 
      Delphi 10.3 Rio or newer (tested on Delphi 12 / dcc64)
-     Raylib bindings for Delphi (ray4delphi or equivalent)
+     Raylib bindings for Delphi (ray4laz or equivalent)
      OpenGL 4.3+ capable GPU (compute shaders + SSBOs)
 
 based on Raylib GPU Particles by arceryz    
