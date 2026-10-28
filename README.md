@@ -5,7 +5,7 @@ GPU particle engine for Delphi 10+ using Raylib with OpenGL 4.3+ compute shaders
       
 Sample video:  https://youtu.be/QT0Lkt7IVJI      
      
- on ryzen4500u was around 2,7m still fine at 60fps, rtx 2060s does a bit more... 15m fine, a 5090 maybe can do even up to 100m or more? no idea      
+ on ryzen4500u around 2,7m still fine @ 60fps, rtx 2060s does bit more... 15m. A 5090 maybe can do even up to 100m or more? no idea      
 <img width="1391" height="745" alt="Unbenannt" src="https://github.com/user-attachments/assets/8770d1bb-cc25-4aa1-91fd-9de1dd8c3f8a" />
       
 Features   
