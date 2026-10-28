@@ -38,6 +38,10 @@ type
     FParticles: TYutaniParticleEngine;
     FCamera: TCamera3D;
     FDesiredParticleCount: Integer;
+    FAutoRotate: Boolean;
+    FCamYaw: Single;
+    FCamPitch: Single;
+    FCamDist: Single;
 
     { Desired parameter values - stored independently of FParticles so that
       when the engine is recreated (e.g. when the user picks a new pool size),
@@ -73,16 +77,24 @@ type
     procedure SetBeta(Value: Single);
     procedure SetInstancesX1000(Value: Single);
     procedure SetMode(Value: Integer);
+    procedure SetEmColor(R, G, B, A: Single);
+    procedure SetEmSize(S: Single);
+    procedure SetGlobalWind(X, Y, Z: Single);
+    procedure SetGlobalGravity(X, Y, Z: Single);
+    procedure SetHDRMultiplier(M: Single);
 
     procedure SetFPS(const FPS: Integer);
     procedure SetDimensions(const W, H: Integer);
     procedure SetCamera(const Pos, Target: TVector3; Fovy: Single);
+    procedure SetAutoRotate(Value: Boolean);
+    procedure UpdateManualCamera;
 
     property RealFPS: Integer read FRealFPS;
     property TargetFPS: Integer read FTargetFPS;
     property Active: Boolean read FActive write SetActive;
     property ParticleEngine: TYutaniParticleEngine read FParticles;
     property DesiredParticleCount: Integer read FDesiredParticleCount;
+    property AutoRotate: Boolean read FAutoRotate write SetAutoRotate;
   end;
 
 implementation
@@ -144,8 +156,12 @@ begin
   FDesiredSigma          := 10.0;
   FDesiredRho            := 28.0;
   FDesiredBeta           := 8.0 / 3.0;
-  FDesiredInstancesX1000 := 100.0;
+  FDesiredInstancesX1000 := 1000.0; // 100% - show ALL particles
   FDesiredMode           := 0;   { Lorenz by default }
+  FAutoRotate := True;
+  FCamYaw := 0.785;   { 45 degrees }
+  FCamPitch := 0.615;  { ~35 degrees }
+  FCamDist := 3.46;    { distance to target }
 end;
 
 destructor TParticleEngine.Destroy;
@@ -195,6 +211,83 @@ begin
   FCamera.position := Pos;
   FCamera.target := Target;
   FCamera.fovy := Fovy;
+end;
+
+procedure TParticleEngine.SetAutoRotate(Value: Boolean);
+begin
+  FAutoRotate := Value;
+end;
+
+{ UpdateManualCamera reads WASD keys + middle-mouse-drag from Raylib and
+  moves/orbits the camera manually. Called instead of UpdateCamera(ORBITAL)
+  when AutoRotate is False. }
+procedure TParticleEngine.UpdateManualCamera;
+var
+  Fwd, Right, RealUp: TVector3;
+  Speed: Single;
+  DX, DY: Single;
+  ToCam: TVector3;
+begin
+  // Build camera basis vectors
+  Fwd.x := FCamera.target.x - FCamera.position.x;
+  Fwd.y := FCamera.target.y - FCamera.position.y;
+  Fwd.z := FCamera.target.z - FCamera.position.z;
+  Fwd := Vector3Normalize(Fwd);
+  Right := Vector3CrossProduct(Fwd, FCamera.up);
+  Right := Vector3Normalize(Right);
+  RealUp := Vector3CrossProduct(Right, Fwd);
+
+  Speed := 0.03;
+
+  // Arrow keys movement (move both position and target so we "fly" through the scene)
+  if IsKeyDown(KEY_UP) then
+  begin
+    FCamera.position := Vector3Add(FCamera.position, Vector3Scale(Fwd, Speed));
+    FCamera.target := Vector3Add(FCamera.target, Vector3Scale(Fwd, Speed));
+  end;
+  if IsKeyDown(KEY_DOWN) then
+  begin
+    FCamera.position := Vector3Subtract(FCamera.position, Vector3Scale(Fwd, Speed));
+    FCamera.target := Vector3Subtract(FCamera.target, Vector3Scale(Fwd, Speed));
+  end;
+  if IsKeyDown(KEY_LEFT) then
+  begin
+    FCamera.position := Vector3Subtract(FCamera.position, Vector3Scale(Right, Speed));
+    FCamera.target := Vector3Subtract(FCamera.target, Vector3Scale(Right, Speed));
+  end;
+  if IsKeyDown(KEY_RIGHT) then
+  begin
+    FCamera.position := Vector3Add(FCamera.position, Vector3Scale(Right, Speed));
+    FCamera.target := Vector3Add(FCamera.target, Vector3Scale(Right, Speed));
+  end;
+
+  // Middle mouse drag = orbit around target (yaw + pitch)
+  if IsMouseButtonDown(MOUSE_MIDDLE_BUTTON) then
+  begin
+    DX := GetMouseDelta().x;
+    DY := GetMouseDelta().y;
+    // Update spherical angles
+    FCamYaw := FCamYaw - DX * 0.008;
+    FCamPitch := FCamPitch + DY * 0.008;
+    // Clamp pitch to avoid gimbal flip
+    if FCamPitch > 1.5 then FCamPitch := 1.5;
+    if FCamPitch < -1.5 then FCamPitch := -1.5;
+    // Recalculate position from spherical coordinates
+    FCamera.position.x := FCamera.target.x + FCamDist * Cos(FCamPitch) * Sin(FCamYaw);
+    FCamera.position.y := FCamera.target.y + FCamDist * Sin(FCamPitch);
+    FCamera.position.z := FCamera.target.z + FCamDist * Cos(FCamPitch) * Cos(FCamYaw);
+  end;
+
+  // Mouse wheel = zoom (adjust distance)
+  if GetMouseWheelMove() <> 0 then
+  begin
+    FCamDist := FCamDist - GetMouseWheelMove() * 0.5;
+    if FCamDist < 1.0 then FCamDist := 1.0;
+    if FCamDist > 20.0 then FCamDist := 20.0;
+    FCamera.position.x := FCamera.target.x + FCamDist * Cos(FCamPitch) * Sin(FCamYaw);
+    FCamera.position.y := FCamera.target.y + FCamDist * Sin(FCamPitch);
+    FCamera.position.z := FCamera.target.z + FCamDist * Cos(FCamPitch) * Cos(FCamYaw);
+  end;
 end;
 
 { ============================================================================
@@ -313,7 +406,7 @@ begin
   FDesiredSigma          := 10.0;
   FDesiredRho            := 28.0;
   FDesiredBeta           := 8.0 / 3.0;
-  FDesiredInstancesX1000 := 100.0;
+  FDesiredInstancesX1000 := 1000.0; // 100% - show ALL particles
   FDesiredMode           := 0;   { Lorenz }
   if Assigned(FParticles) then
     FParticles.Reset;
@@ -372,14 +465,46 @@ begin
     FParticles.SetMode(Value);
 end;
 
+procedure TParticleEngine.SetEmColor(R, G, B, A: Single);
+begin
+  if Assigned(FParticles) then
+    FParticles.SetEmColor(R, G, B, A);
+end;
+
+procedure TParticleEngine.SetEmSize(S: Single);
+begin
+  if Assigned(FParticles) then
+    FParticles.SetEmSize(S);
+end;
+
+procedure TParticleEngine.SetGlobalWind(X, Y, Z: Single);
+begin
+  if Assigned(FParticles) then
+    FParticles.SetGlobalWind(X, Y, Z);
+end;
+
+procedure TParticleEngine.SetGlobalGravity(X, Y, Z: Single);
+begin
+  if Assigned(FParticles) then
+    FParticles.SetGlobalGravity(X, Y, Z);
+end;
+
+procedure TParticleEngine.SetHDRMultiplier(M: Single);
+begin
+  if Assigned(FParticles) then
+    FParticles.SetHDRMultiplier(M);
+end;
+
 procedure TParticleEngine.RenderScene;
 begin
   BeginDrawing();
   ClearBackground(BLACK);
 
-  // Orbit the camera around the origin - matches main.c's
-  // UpdateCamera(&camera, CAMERA_ORBITAL).
-  UpdateCamera(@FCamera, CAMERA_ORBITAL);
+  // Camera: auto-rotate (orbit) or manual (WASD + middle-mouse drag + wheel zoom)
+  if FAutoRotate then
+    UpdateCamera(@FCamera, CAMERA_ORBITAL)
+  else
+    UpdateManualCamera;
 
   rlEnableDepthTest();
   rlDisableBackfaceCulling();

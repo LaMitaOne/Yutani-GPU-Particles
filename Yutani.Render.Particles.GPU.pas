@@ -1,20 +1,26 @@
-﻿{*******************************************************************************
-  Yutani.Render.Particles.GPU v0.1
+{*******************************************************************************
+  Yutani.Render.Particles.GPU v0.2
 ********************************************************************************
-  GPU compute-shader particle engine with 11 show modes.
+  GPU compute-shader particle engine with 60 modes + global forces + HDR.
 
-  Show modes (uniform int mode):
-    0  - Lorenz attractor (chaotic motion)
-    1  - Cube form (lerp to cube surface)
-    2  - Sphere form (Fibonacci sphere + rotation)
-    3  - Sine wave field (3D sine motion)
-    4  - Galaxy spiral (Keplerian orbit)
-    5  - Fountain (gravity + respawn + bounce)
-    6  - Vortex (tornado swirl)
-    7  - DNA Helix (double helix pattern)
-    8  - Black Hole (gravity + orbital + respawn)
-    9  - Exploding Shell (expand + collapse oscillation)
-    10 - Flow Field (curl noise approximation)
+  Show modes (0-11): Lorenz, Cube, Sphere, Wave, Galaxy, Fountain, Vortex,
+    DNA Helix, Black Hole, Explode, Flow Field, Stickman Scene
+
+  Emitter modes (12-59): Fog, Fire, Rain, Snow, Smoke, Explosion, Sparks,
+    Fountain2, Storm, Dust, Ants, BlackGoo, Bubbles, Fireflies, Leaves,
+    Energy, Plasma, Lightning, Ash, Debris, Steam, SnowDrift, Insects,
+    Swarm, Beam, Portal, Crystal, PixieDust, GhostMist, Comet, Shockwave,
+    RainSplash, LavaBubble, StarField, Nebula, Tornado, Glow, VolLight,
+    Sandstorm, Hailstorm, Whirlpool, Mushroom, SmokeColumn, BlackSmoke,
+    EngineExhaust, SparkTrail, MagicMissile, Clouds (FBM noise)
+
+  Features:
+    - Custom color/alpha/size per emitter mode (emColorR/G/B/A, emSize uniforms)
+    - Global forces (globalWind, globalGravity vec3 uniforms)
+    - HDR multiplier for bloom post-processing
+    - Manual camera (arrow keys + middle-mouse drag + wheel zoom)
+    - Auto-rotate toggle
+    - FBM noise functions for organic cloud formations
 
   Author: Lara Miriam Tamy Reschke / LamitaOne
 *******************************************************************************}
@@ -56,6 +62,14 @@ type
     FPushStrength:   Single;
     FPushActive:     Boolean;
     FGPUInitialized: Boolean;
+    FEmColorR:       Single;
+    FEmColorG:       Single;
+    FEmColorB:       Single;
+    FEmColorA:       Single;
+    FEmSize:         Single;
+    FGlobalWind:     TVector3;
+    FGlobalGravity:  TVector3;
+    FHDRMultiplier:  Single;
     FCompLoc_Time:           Integer;
     FCompLoc_TimeScale:      Integer;
     FCompLoc_DeltaTime:      Integer;
@@ -68,9 +82,21 @@ type
     FCompLoc_PushRadius:     Integer;
     FCompLoc_PushStrength:   Integer;
     FCompLoc_PushActive:     Integer;
+    FCompLoc_EmColorR:      Integer;
+    FCompLoc_EmColorG:      Integer;
+    FCompLoc_EmColorB:      Integer;
+    FCompLoc_EmColorA:      Integer;
+    FCompLoc_GlobalWind:    Integer;
+    FCompLoc_GlobalGravity: Integer;
     FRendLoc_ProjMatrix:    Integer;
     FRendLoc_ViewMatrix:    Integer;
     FRendLoc_ParticleScale: Integer;
+    FRendLoc_EmColorR:     Integer;
+    FRendLoc_EmColorG:     Integer;
+    FRendLoc_EmColorB:     Integer;
+    FRendLoc_EmColorA:     Integer;
+    FRendLoc_EmSize:        Integer;
+    FRendLoc_HDRMultiplier:  Integer;
     procedure InitGPUResources;
     procedure FreeGPUResources;
     procedure BuildBillboardVAO;
@@ -88,6 +114,11 @@ type
     procedure SetMode(AMode: Integer);
     procedure SetPush(const APos: TVector3; ARadius, AStrength: Single);
     procedure ClearPush;
+    procedure SetEmColor(R, G, B, A: Single);
+    procedure SetEmSize(S: Single);
+    procedure SetGlobalWind(X, Y, Z: Single);
+    procedure SetGlobalGravity(X, Y, Z: Single);
+    procedure SetHDRMultiplier(M: Single);
     property NumParticles:        Integer read FNumParticles;
     property ParticleScale:       Single  read FParticleScale  write FParticleScale;
     property TimeScale:           Single  read FTimeScale      write FTimeScale;
@@ -353,6 +384,12 @@ const
     'layout(location=9) uniform float pushRadius;'#10 +
     'layout(location=10) uniform float pushStrength;'#10 +
     'layout(location=11) uniform int pushActive;'#10 +
+    'layout(location=12) uniform float emColorR;'#10 +
+    'layout(location=13) uniform float emColorG;'#10 +
+    'layout(location=14) uniform float emColorB;'#10 +
+    'layout(location=15) uniform float emColorA;'#10 +
+    'layout(location=16) uniform vec3 globalWind;'#10 +
+    'layout(location=17) uniform vec3 globalGravity;'#10 +
     'const float PI = 3.14159;'#10 +
     'float rand(float n) { return fract(sin(n*12.9898)*43758.5453); }'#10 +
     'void main() {'#10 +
@@ -480,7 +517,370 @@ const
     '        // Fixed colors per element: 1=sun(yellow) 2=stickman(blue) 3=housebody(brown) 4=roof(red) 5=trees(green) 6=street(gray) 7=flowers(pink) 8=ground(dark green)'#10 +
     '        if (r<0.04) colorIdx=1.0; else if (r<0.14) colorIdx=2.0; else if (r<0.27) colorIdx=3.0; else if (r<0.34) colorIdx=4.0; else if (r<0.49) colorIdx=5.0; else if (r<0.59) colorIdx=6.0; else if (r<0.69) colorIdx=7.0; else colorIdx=8.0;'#10 +
     '        pos = mix(pos, t, 0.04); vel = (t-pos)*3.0;'#10 +
+    '    } else if (mode == 12) {'#10 +
+    '        // FOG - slow upward + lateral sin drift, wrap at edges.'#10 +
+    '        vel.x = sin(time*0.5 + float(index)*0.1)*0.3;'#10 +
+    '        vel.y = 0.2 + rand(float(index))*0.1;'#10 +
+    '        vel.z = cos(time*0.4 + float(index)*0.13)*0.3;'#10 +
+    '        pos += vel*deltaTime*timeScale*3.0;'#10 +
+    '        if (pos.y > 1.0) pos.y = -1.0;'#10 +
+    '        if (abs(pos.x) > 1.5) pos.x = -pos.x*0.9;'#10 +
+    '        if (abs(pos.z) > 1.5) pos.z = -pos.z*0.9;'#10 +
+    '    } else if (mode == 13) {'#10 +
+    '        // FIRE - upward turbulent, fast rise, swirl'#10 +
+    '        vel.x = sin(time*3.0 + float(index)*0.5 + pos.y*4.0)*1.5;'#10 +
+    '        vel.y = 2.5 + rand(float(index))*1.0;'#10 +
+    '        vel.z = cos(time*2.5 + float(index)*0.4 + pos.y*3.0)*1.5;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 14) {'#10 +
+    '        // RAIN - gravity down, respawn at top'#10 +
+    '        vel.y -= 15.0*deltaTime*timeScale;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; vel = vec3(0.0,-8.0,0.0); }'#10 +
+    '    } else if (mode == 15) {'#10 +
+    '        // SNOW - slow downward with sway'#10 +
+    '        vel.x = sin(time + float(index)*0.3)*0.5;'#10 +
+    '        vel.y = -0.8;'#10 +
+    '        vel.z = cos(time*0.7 + float(index)*0.2)*0.5;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 16) {'#10 +
+    '        // SMOKE - upward expanding, slow fade'#10 +
+    '        vel.x = sin(time*0.5 + float(index)*0.2)*0.3;'#10 +
+    '        vel.y = 0.8 + rand(float(index))*0.4;'#10 +
+    '        vel.z = cos(time*0.4 + float(index)*0.3)*0.3;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 17) {'#10 +
+    '        // EXPLOSION - outward burst + gravity, one-shot feel'#10 +
+    '        vec3 from_center = pos;'#10 +
+    '        if (length(from_center) > 0.001) vel += normalize(from_center)*2.0*deltaTime;'#10 +
+    '        vel.y -= 5.0*deltaTime*timeScale;'#10 +
+    '        vel *= 0.98;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (length(pos) > 2.0) { pos = vec3(0.0); vel = normalize(vec3(rand(float(index))-0.5, rand(float(index)*1.3)-0.5, rand(float(index)*2.1)-0.5))*3.0; }'#10 +
+    '    } else if (mode == 18) {'#10 +
+    '        // SPARKS - fast outward + gravity, short bursts'#10 +
+    '        vec3 from_center = pos;'#10 +
+    '        if (length(from_center) > 0.001) vel += normalize(from_center)*8.0*deltaTime;'#10 +
+    '        vel.y -= 12.0*deltaTime*timeScale;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (length(pos) > 2.0 || pos.y < -1.0) { pos = vec3(0.0); vel = normalize(vec3(rand(float(index))-0.5, abs(rand(float(index)*1.3)), rand(float(index)*2.1)-0.5))*5.0; }'#10 +
+    '    } else if (mode == 19) {'#10 +
+    '        // FOUNTAIN2 - gravity + respawn at origin'#10 +
+    '        vel.y -= 9.81*deltaTime*timeScale;'#10 +
+    '        pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (pos.y < -1.0) { pos = vec3(0.0); vel = vec3(rand(float(index))-0.5, 5.0+rand(float(index))*2.0, rand(float(index)*1.3)-0.5); }'#10 +
+    '    } else if (mode == 20) {'#10 +
+    '        // STORM - chaotic 3D flow field, region wrap'#10 +
+    '        vec3 p = pos*0.5 + vec3(time*0.2);'#10 +
+    '        vel.x = sin(p.y*2.0 + time)*5.0;'#10 +
+    '        vel.y = sin(p.z*1.7 + time*1.3)*2.0;'#10 +
+    '        vel.z = cos(p.x*2.1 + time*0.7)*5.0;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.x < -1.0) pos.x = 1.0; if (pos.x > 1.0) pos.x = -1.0;'#10 +
+    '        if (pos.y < -1.0) pos.y = 1.0; if (pos.y > 1.0) pos.y = -1.0;'#10 +
+    '        if (pos.z < -1.0) pos.z = 1.0; if (pos.z > 1.0) pos.z = -1.0;'#10 +
+    '    } else if (mode == 21) {'#10 +
+    '        // DUST - slow drifting fine particles'#10 +
+    '        vel.x = sin(time*0.2 + float(index)*0.5)*0.2;'#10 +
+    '        vel.y = cos(time*0.15 + float(index)*0.3)*0.1;'#10 +
+    '        vel.z = sin(time*0.18 + float(index)*0.4)*0.2;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.x < -1.0) pos.x = 1.0; if (pos.x > 1.0) pos.x = -1.0;'#10 +
+    '        if (pos.y < -1.0) pos.y = 1.0; if (pos.y > 1.0) pos.y = -1.0;'#10 +
+    '        if (pos.z < -1.0) pos.z = 1.0; if (pos.z > 1.0) pos.z = -1.0;'#10 +
+    '    } else if (mode == 22) {'#10 +
+    '        // ANTS - ground-level random walk, stay near Y=-0.8'#10 +
+    '        float ph = sin(pos.x*0.5 + pos.z*0.5 + time);'#10 +
+    '        vel.x = sin(float(index)*1.7 + time*2.0 + ph*3.0)*1.5;'#10 +
+    '        vel.z = cos(float(index)*2.3 + time*1.5 + ph*2.0)*1.5;'#10 +
+    '        vel.y = 0.0;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        pos.y = -0.8;'#10 +
+    '        if (pos.x < -1.0) pos.x = 1.0; if (pos.x > 1.0) pos.x = -1.0;'#10 +
+    '        if (pos.z < -1.0) pos.z = 1.0; if (pos.z > 1.0) pos.z = -1.0;'#10 +
+    '    } else if (mode == 23) {'#10 +
+    '        // BLACK GOO - viscous dripping, gravity + moderate drag'#10 +
+    '        vel.y -= 6.0*deltaTime*timeScale;'#10 +
+    '        vel *= 0.99;'#10 +
+    '        pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; vel = vec3(0.0, -0.5, 0.0); }'#10 +
+    '    } else if (mode == 24) {'#10 +
+    '        // BUBBLES - upward wobble, wrap at top'#10 +
+    '        vel.y = 1.0 + sin(time*2.0+float(index)*0.5)*0.3;'#10 +
+    '        vel.x = sin(time+float(index)*0.7)*0.2;'#10 +
+    '        vel.z = cos(time*0.9+float(index)*0.4)*0.2;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 25) {'#10 +
+    '        // FIREFLIES - slow random walk with glow pulse (color pulse via velocity)'#10 +
+    '        vel.x = sin(time*0.7+float(index)*1.3)*0.5;'#10 +
+    '        vel.y = cos(time*0.5+float(index)*0.9)*0.5;'#10 +
+    '        vel.z = sin(time*0.6+float(index)*1.7)*0.5;'#10 +
+    '        pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (abs(pos.x) > 1.5) pos.x = -pos.x*0.9;'#10 +
+    '        if (abs(pos.y) > 1.5) pos.y = -pos.y*0.9;'#10 +
+    '        if (abs(pos.z) > 1.5) pos.z = -pos.z*0.9;'#10 +
+    '    } else if (mode == 26) {'#10 +
+    '        // LEAVES - falling with rotation/sway'#10 +
+    '        vel.x = sin(time*0.8+float(index)*0.5)*1.5;'#10 +
+    '        vel.y = -1.0;'#10 +
+    '        vel.z = cos(time*0.6+float(index)*0.3)*1.5;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 27) {'#10 +
+    '        // ENERGY - field crackle around center, pulse'#10 +
+    '        vec3 nz = vec3(sin(pos.x*5.0+time*10.0), sin(pos.y*5.0+time*8.0), sin(pos.z*5.0+time*9.0));'#10 +
+    '        vel += nz*3.0*deltaTime;'#10 +
+    '        vec3 tc = vec3(0.0) - pos; vel += normalize(tc)*0.5*deltaTime;'#10 +
+    '        vel *= 0.9;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (length(pos) > 2.0) pos = normalize(pos)*1.5;'#10 +
+    '    } else if (mode == 28) {'#10 +
+    '        // PLASMA - chaotic electric motion with noise + radial pull'#10 +
+    '        vec3 tc = vec3(0.0) - pos; float d = length(tc);'#10 +
+    '        vec3 noise = vec3(rand(float(index)+time)-0.5, rand(float(index)*1.3+time)-0.5, rand(float(index)*2.1+time)-0.5);'#10 +
+    '        if (d > 0.001) { vec3 rad = normalize(tc); vec3 tan = cross(rad, vec3(0,1,0)); vel += (rad*sin(time*8.0+d*5.0) + tan*cos(time*6.0+d*3.0) + noise*4.0)*3.0*deltaTime; }'#10 +
+    '        vel *= 0.95; pos += vel*deltaTime*timeScale;'#10 +
+    '        if (length(pos) > 2.0) pos = normalize(pos)*1.5;'#10 +
+    '    } else if (mode == 29) {'#10 +
+    '        // LIGHTNING - jagged fast random walk + strobe pulse (via velocity)'#10 +
+    '        vel.x = (rand(float(index)+time)-0.5)*8.0;'#10 +
+    '        vel.y = -2.0;'#10 +
+    '        vel.z = (rand(float(index)*1.3+time)-0.5)*8.0;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 30) {'#10 +
+    '        // ASH - slow falling embers, color shift via velocity direction'#10 +
+    '        vel.x = sin(time*0.5+float(index)*0.3)*0.8;'#10 +
+    '        vel.y = -0.5 - rand(float(index))*0.5;'#10 +
+    '        vel.z = cos(time*0.4+float(index)*0.5)*0.8;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 31) {'#10 +
+    '        // DEBRIS - outward explosion with rotation (size varies via velocity)'#10 +
+    '        vec3 fc = pos; if (length(fc) > 0.001) vel += normalize(fc)*1.0*deltaTime;'#10 +
+    '        vel.y -= 8.0*deltaTime*timeScale; vel *= 0.98;'#10 +
+    '        pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (length(pos) > 2.0) { pos = vec3(0.0); vel = normalize(vec3(rand(float(index))-0.5, rand(float(index)*1.3), rand(float(index)*2.1)-0.5))*4.0; }'#10 +
+    '    } else if (mode == 32) {'#10 +
+    '        // STEAM - hot vapor rising, expanding, drift'#10 +
+    '        vel.x = sin(time*0.6+float(index)*0.3)*0.5;'#10 +
+    '        vel.y = 1.5 + rand(float(index))*0.5;'#10 +
+    '        vel.z = cos(time*0.5+float(index)*0.4)*0.5;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 33) {'#10 +
+    '        // SNOW DRIFT - snow falls and accumulates on ground (Y=-1.0), stays frozen'#10 +
+    '        if (pos.y > -1.0) {'#10 +
+    '            vel.x = sin(time*0.5 + float(index)*0.3)*0.5;'#10 +
+    '            vel.y = -0.4;'#10 +
+    '            vel.z = cos(time*0.4 + float(index)*0.2)*0.5;'#10 +
+    '            pos += vel*deltaTime*timeScale;'#10 +
+    '            if (pos.y < -1.0) pos.y = -1.0;'#10 +
+    '        } else {'#10 +
+    '            // Already on ground - frozen, no movement'#10 +
+    '            vel = vec3(0.0);'#10 +
+    '            pos.y = -1.0;'#10 +
+    '        }'#10 +
+    '    } else if (mode == 34) {'#10 +
+    '        // INSECTS - 3D flight with wing flutter + swarm centering'#10 +
+    '        vec3 swirl = vec3(sin(time*5.0+float(index)*0.3), cos(time*4.0+float(index)*0.5), sin(time*4.5+float(index)*0.4));'#10 +
+    '        vec3 tc = vec3(0.0) - pos; vel += tc*0.3*deltaTime + swirl*2.0*deltaTime; vel *= 0.95;'#10 +
+    '        pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (abs(pos.x) > 1.5) pos.x = -pos.x*0.9; if (abs(pos.z) > 1.5) pos.z = -pos.z*0.9;'#10 +
+    '    } else if (mode == 35) {'#10 +
+    '        // SWARM - boids-like centering + wander around origin'#10 +
+    '        vec3 tc = vec3(0.0) - pos; float d = length(tc);'#10 +
+    '        vec3 w = vec3(sin(time+float(index)*0.5), cos(time*1.3+float(index)*0.3), sin(time*0.7+float(index)*0.9));'#10 +
+    '        vel += w*0.5*deltaTime + normalize(tc)*0.3*deltaTime; if (d > 1.0) vel += normalize(tc)*2.0*deltaTime;'#10 +
+    '        vel *= 0.97; pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '    } else if (mode == 36) {'#10 +
+    '        // BEAM - sparkle shower falling from top'#10 +
+    '        vel.y = -3.0 - rand(float(index))*2.0; vel.x = sin(time*10.0+float(index))*0.5; vel.z = cos(time*8.0+float(index))*0.5;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 37) {'#10 +
+    '        // PORTAL - swirling disc in XZ plane around origin'#10 +
+    '        vec3 tc = vec3(0.0) - pos; tc.y = 0.0; float r = length(tc);'#10 +
+    '        float ang = atan(pos.z, pos.x); float sp = 4.0/max(r, 0.2); ang += sp*deltaTime*timeScale;'#10 +
+    '        pos.x = r*cos(ang); pos.z = r*sin(ang); pos.y = sin(time*2.0+float(index))*0.1;'#10 +
+    '        vel = vec3(-sin(ang), 0.0, cos(ang))*sp;'#10 +
+    '    } else if (mode == 38) {'#10 +
+    '        // CRYSTAL GROWTH - particles drift inward then freeze at radius'#10 +
+    '        vec3 tc = vec3(0.0) - pos; float d = length(tc);'#10 +
+    '        if (d > 0.5) vel = normalize(tc)*0.5; else vel = vec3(0.0); pos += vel*deltaTime*timeScale;'#10 +
+    '        if (d < 0.52) pos = normalize(pos)*0.5;'#10 +
+    '    } else if (mode == 39) {'#10 +
+    '        // PIXIE DUST - magical sparkle trail with sharp pulses'#10 +
+    '        vec3 w = vec3(sin(time*2.0+float(index)*1.7), cos(time*1.5+float(index)*1.3), sin(time*1.8+float(index)*1.1));'#10 +
+    '        vel += w*1.0*deltaTime; vel *= 0.96; pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (abs(pos.x) > 1.5) pos.x = -pos.x*0.9; if (abs(pos.y) > 1.5) pos.y = -pos.y*0.9; if (abs(pos.z) > 1.5) pos.z = -pos.z*0.9;'#10 +
+    '    } else if (mode == 40) {'#10 +
+    '        // GHOST MIST - translucent drifting, region wrap, slow'#10 +
+    '        vel.x = sin(time*0.3+float(index)*0.7)*0.3; vel.y = sin(time*0.2+float(index)*0.5+pos.x*0.3)*0.2; vel.z = cos(time*0.25+float(index)*0.6)*0.3;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.x < -1.0) pos.x = 1.0; if (pos.x > 1.0) pos.x = -1.0; if (pos.z < -1.0) pos.z = 1.0; if (pos.z > 1.0) pos.z = -1.0;'#10 +
+    '    } else if (mode == 41) {'#10 +
+    '        // COMET - particles drift toward origin from far away'#10 +
+    '        vec3 tc = vec3(0.0) - pos; float d = length(tc);'#10 +
+    '        if (d > 0.001) vel = normalize(tc)*1.0; pos += vel*deltaTime*timeScale;'#10 +
+    '        if (d < 0.1) { pos = vec3(rand(float(index)+time)*3.0-1.5, rand(float(index)*1.3)*3.0-1.5, rand(float(index)*2.1+time)*3.0-1.5); vel = vec3(0.0); }'#10 +
+    '    } else if (mode == 42) {'#10 +
+    '        // SHOCKWAVE RING - rapidly expanding ring on ground, respawn at center'#10 +
+    '        vec3 tc = vec3(0.0) - pos; tc.y = 0.0; float r = length(tc);'#10 +
+    '        float ang = atan(pos.z, pos.x); r += 5.0*deltaTime*timeScale;'#10 +
+    '        pos.x = r*cos(ang); pos.z = r*sin(ang); pos.y = -0.9;'#10 +
+    '        if (r > 2.0) { r = 0.1; pos = vec3(0.1*cos(ang), -0.9, 0.1*sin(ang)); }'#10 +
+    '    } else if (mode == 43) {'#10 +
+    '        // RAIN SPLASH - particles bounce up from ground then fall back'#10 +
+    '        vel.y -= 10.0*deltaTime*timeScale; pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { float a = rand(float(index)+time)*6.2831; vel = vec3(cos(a)*2.0, 2.0+rand(float(index))*1.0, sin(a)*2.0); pos.y = -1.0; }'#10 +
+    '    } else if (mode == 44) {'#10 +
+    '        // LAVA BUBBLE - bubbling upward, pop at top, respawn at bottom'#10 +
+    '        vel.y = 0.5 + rand(float(index))*0.3; vel.x = sin(time*2.0+float(index))*0.1; vel.z = cos(time*1.8+float(index))*0.1;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 0.5) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 45) {'#10 +
+    '        // STAR FIELD - twinkling stars, very slow drift, region wrap'#10 +
+    '        vel.x = sin(time*0.05+float(index))*0.05; vel.y = cos(time*0.04+float(index)*0.7)*0.05; vel.z = sin(time*0.06+float(index)*0.3)*0.05;'#10 +
+    '        pos += vel*deltaTime;'#10 +
+    '        if (pos.x < -1.0) pos.x = 1.0; if (pos.x > 1.0) pos.x = -1.0; if (pos.y < -1.0) pos.y = 1.0; if (pos.y > 1.0) pos.y = -1.0; if (pos.z < -1.0) pos.z = 1.0; if (pos.z > 1.0) pos.z = -1.0;'#10 +
+    '    } else if (mode == 46) {'#10 +
+    '        // NEBULA - slow drifting cloud with wave-modulated motion, region wrap'#10 +
+    '        vel.x = sin(pos.x*0.3+time*0.1)*0.3 + sin(time*0.2+float(index)*0.1)*0.1;'#10 +
+    '        vel.y = sin(pos.y*0.3+time*0.08)*0.2;'#10 +
+    '        vel.z = cos(pos.z*0.3+time*0.09)*0.3 + cos(time*0.15+float(index)*0.15)*0.1;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.x < -1.0) pos.x = 1.0; if (pos.x > 1.0) pos.x = -1.0; if (pos.y < -1.0) pos.y = 1.0; if (pos.y > 1.0) pos.y = -1.0; if (pos.z < -1.0) pos.z = 1.0; if (pos.z > 1.0) pos.z = -1.0;'#10 +
+    '    } else if (mode == 47) {'#10 +
+    '        // TORNADO - 3D rotating vortex, wider funnel, shorter height'#10 +
+    '        vec3 tc = vec3(0.0) - pos; tc.y = 0.0; float r = length(tc); float ang = atan(pos.z, pos.x);'#10 +
+    '        float sp = 6.0/max(r, 0.3); ang += sp*deltaTime*timeScale;'#10 +
+    '        float heightFrac = (pos.y + 1.0) * 0.5; float funnel = 0.7 + heightFrac*0.3;'#10 +
+    '        pos.x = r*funnel*cos(ang); pos.z = r*funnel*sin(ang); pos.y += (1.2+r*0.2)*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 0.6) { float a2 = rand(float(index)+time)*6.2831; float r2 = rand(float(index)*1.7+time)*1.2; pos = vec3(cos(a2)*r2, -1.0, sin(a2)*r2); }'#10 +
+    '        vel = vec3(-sin(ang), 1.5, cos(ang))*sp;'#10 +
+    '    } else if (mode == 48) {'#10 +
+    '        // GLOW - pulsing radial light halo around origin, slow drift outward + pull back'#10 +
+    '        vec3 tc = vec3(0.0) - pos; float d = length(tc); if (d > 0.001) vel += normalize(tc)*0.5*deltaTime; vel *= 0.95; pos += vel*deltaTime*timeScale;'#10 +
+    '        if (length(pos) > 1.5) pos = normalize(pos)*1.5;'#10 +
+    '    } else if (mode == 49) {'#10 +
+    '        // VOLUMETRIC LIGHT - god rays shimmer, upward beam'#10 +
+    '        vec3 to_origin = vec3(0.0) - pos; float d = length(to_origin);'#10 +
+    '        vec3 outward = vec3(0.0); if (d > 0.001) outward = normalize(to_origin)*-1.0;'#10 +
+    '        vel = outward*0.3 + vec3(0.0, 0.6, 0.0); pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 50) {'#10 +
+    '        // SANDSTORM - fast horizontal wind, region wrap'#10 +
+    '        vel.x = 8.0 + sin(time*0.5+pos.y*0.3)*2.0; vel.y = sin(time+float(index))*0.3; vel.z = cos(time*0.5+float(index))*0.5;'#10 +
+    '        pos += vel*deltaTime*timeScale; if (pos.x > 1.0) pos.x = -1.0;'#10 +
+    '    } else if (mode == 51) {'#10 +
+    '        // HAILSTORM - heavy ice balls with bounce on ground'#10 +
+    '        vel.y -= 18.0*deltaTime*timeScale; vel.x = sin(time+float(index)*0.3)*0.3; pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y < -1.0) { pos.y = -1.0; vel.y = abs(vel.y)*0.4; if (abs(vel.y) < 1.0) { pos.y = 1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; vel = vec3(0.0,-2.0,0.0); } }'#10 +
+    '    } else if (mode == 52) {'#10 +
+    '        // WHIRPOOL - water vortex spiral inward in XZ plane'#10 +
+    '        vec3 tc = vec3(0.0) - pos; tc.y = 0.0; float r = length(tc); float ang = atan(pos.z, pos.x);'#10 +
+    '        float sp = 3.0/max(r, 0.2); ang += sp*deltaTime*timeScale; r -= 0.3*deltaTime*timeScale;'#10 +
+    '        if (r < 0.1) { r = 1.0+rand(float(index)+time)*0.5; ang = rand(float(index)*1.7+time)*6.2831; }'#10 +
+    '        pos.x = r*cos(ang); pos.z = r*sin(ang); pos.y = -0.5 + sin(time*2.0+r*5.0)*0.05;'#10 +
+    '    } else if (mode == 53) {'#10 +
+    '        // MUSHROOM CLOUD - burst outward, rise, then cap spreads at top'#10 +
+    '        float dist = length(pos);'#10 +
+    '        float y = pos.y;'#10 +
+    '        if (y < 0.3) {'#10 +
+    '            // Rising column: particles go straight up, slight outward push'#10 +
+    '            vel.y = 1.5 + rand(float(index))*0.5;'#10 +
+    '            vec3 fc = pos; fc.y = 0.0; if (length(fc) > 0.001) vel += normalize(fc)*0.3*deltaTime;'#10 +
+    '        } else {'#10 +
+    '            // Cap: spread outward + slow rise, curl back down at edges'#10 +
+    '            vec3 fc = pos; fc.y = 0.0; if (length(fc) > 0.001) vel += normalize(fc)*1.5*deltaTime;'#10 +
+    '            vel.y = 0.3; if (length(fc) > 0.6) vel.y -= 0.5;'#10 +
+    '        }'#10 +
+    '        vel *= 0.97; pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (pos.y > 1.0 || length(pos) > 2.0) { pos = vec3(rand(float(index))-0.5, -1.0, rand(float(index)*1.3)-0.5)*0.3; vel = vec3(0.0, 1.0, 0.0); }'#10 +
+    '    } else if (mode == 54) {'#10 +
+    '        // SMOKE COLUMN - vertical stream with lateral wobble, respawn at bottom'#10 +
+    '        vel.y = 1.5 + rand(float(index))*0.5; vel.x = sin(time*0.5+float(index)*0.3+pos.y*0.3)*0.5; vel.z = cos(time*0.4+float(index)*0.2+pos.y*0.2)*0.5;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 55) {'#10 +
+    '        // BLACK SMOKE - heavy dark slow-rising smoke, dense and slow'#10 +
+    '        vel.y = 0.3 + rand(float(index))*0.2; vel.x = sin(time*0.3+float(index)*0.5)*0.15; vel.z = cos(time*0.2+float(index)*0.4)*0.15;'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        if (pos.y > 1.0) { pos.y = -1.0; pos.x = rand(float(index)+time)*2.0-1.0; pos.z = rand(float(index)*1.3+time)*2.0-1.0; }'#10 +
+    '    } else if (mode == 56) {'#10 +
+    '        // ENGINE EXHAUST - thick short burst, dissipates outward and fades'#10 +
+    '        vec3 dir = vec3(0.0, 0.0, 1.0);'#10 +
+    '        float dist = max(pos.z, 0.0);'#10 +
+    '        float spread = 0.1 + dist*1.2;'#10 +
+    '        vec3 right_v = vec3(1.0, 0.0, 0.0); vec3 up_v = vec3(0.0, 1.0, 0.0);'#10 +
+    '        float ang = rand(float(index)+time)*6.2831;'#10 +
+    '        float rad = rand(float(index)*1.3)*spread;'#10 +
+    '        float speed = max(4.0 - dist*6.0, 0.2);'#10 +
+    '        vec3 offset = (right_v*cos(ang) + up_v*sin(ang))*rad*2.5;'#10 +
+    '        vel = dir*speed + offset;'#10 +
+    '        vel += vec3(rand(float(index)*3.7+time)-0.5, rand(float(index)*4.1+time)-0.5, rand(float(index)*5.3+time)-0.5)*dist*0.8;'#10 +
+    '        pos += vel*deltaTime*timeScale*2.0;'#10 +
+    '        if (pos.z > 0.5 || length(vec3(pos.x, pos.y, 0.0)) > 0.5) { pos = vec3(0.0); vel = vec3(0.0); }'#10 +
+    '    } else if (mode == 57) {'#10 +
+    '        // SPARK TRAIL - sparkler-style spark trail with flicker, gravity'#10 +
+    '        vec3 from_origin = pos; if (length(from_origin) > 0.001) vel += normalize(from_origin)*2.0*deltaTime;'#10 +
+    '        vel.y -= 5.0*deltaTime*timeScale; vel.x += sin(time*20.0+float(index))*0.5*deltaTime; vel.z += cos(time*18.0+float(index))*0.5*deltaTime;'#10 +
+    '        pos += vel*deltaTime*timeScale; if (length(pos) > 2.0) { pos = vec3(0.0); vel = normalize(vec3(rand(float(index))-0.5, abs(rand(float(index)*1.3)), rand(float(index)*2.1)-0.5))*5.0; }'#10 +
+    '    } else if (mode == 58) {'#10 +
+    '        // MAGIC MISSILE - projectile moving forward with trailing spiral behind it'#10 +
+    '        float t = fract(time*0.3 + float(index)/float(particleCount)); // 0..1 cycle'#10 +
+    '        float zPos = t*2.0 - 1.0; // moves from -1 to +1 along Z'#10 +
+    '        float trailOffset = (1.0-t)*0.5; // trail spreads behind the head'#10 +
+    '        float ang = time*10.0 + float(index)*0.3;'#10 +
+    '        float rad = trailOffset + 0.05;'#10 +
+    '        vec3 target_pos = vec3(cos(ang)*rad, sin(ang)*rad, zPos - trailOffset*2.0);'#10 +
+    '        pos = mix(pos, target_pos, 0.15); vel = (target_pos - pos)*5.0;'#10 +
+    '    } else if (mode == 59) {'#10 +
+    '        // CLOUDS - Curl Noise: divergenzfreies Wirbel-Rauschen, kein Zusammenballen'#10 +
+    '        // Partikel flieen umeinander herum wie echter Wasserdampf/Rauch.'#10 +
+    '        vec3 p = pos * 1.8; // Skalierung der Wolkenstrukturen'#10 +
+    '        float t = time * 0.15; // Geschwindigkeit der inneren Verformung'#10 +
+    '        float e = 0.008; // Schrittweite fuer numerische Ableitung (Finite Differences)'#10 +
+    '        // Prozedurale 3D-Rausch-Funktion (Layered Sines + Rotation fuer Pseudo-Noise)'#10 +
+    '        // Erzeugt ein unkorreliertes Feld fuer das Vektor-Potential A'#10 +
+    '        #define NOISE3D(q) (sin((q).x + t) * cos((q).y - t * 0.7) * sin((q).z + t * 0.3) + sin((q).y * 2.1 + t * 1.3) * cos((q).z * 1.7 - t) * sin((q).x * 1.5 + t * 0.5) * 0.5)'#10 +
+    '        // Numerische Rotation (Curl) berechnen: v = nabla x A'#10 +
+    '        float ax_dy = NOISE3D(p+vec3(0.0,e,0.0)) - NOISE3D(p-vec3(0.0,e,0.0));'#10 +
+    '        float ax_dz = NOISE3D(p+vec3(0.0,0.0,e)) - NOISE3D(p-vec3(0.0,0.0,e));'#10 +
+    '        float ay_dx = NOISE3D(p+vec3(e,0.0,0.0)) - NOISE3D(p-vec3(e,0.0,0.0));'#10 +
+    '        float ay_dz = NOISE3D(p+vec3(0.0,0.0,e)) - NOISE3D(p-vec3(0.0,0.0,e));'#10 +
+    '        float az_dx = NOISE3D(p+vec3(e,0.0,0.0)) - NOISE3D(p-vec3(e,0.0,0.0));'#10 +
+    '        float az_dy = NOISE3D(p+vec3(0.0,e,0.0)) - NOISE3D(p-vec3(0.0,e,0.0));'#10 +
+    '        // Curl-Vektor: divergenzfreies Geschwindigkeitsfeld'#10 +
+    '        vec3 curl;'#10 +
+    '        curl.x = az_dy - ay_dz;'#10 +
+    '        curl.y = ax_dz - az_dx;'#10 +
+    '        curl.z = ay_dx - ax_dy;'#10 +
+    '        float cl = length(curl); if (cl > 0.001) curl = normalize(curl) * (cl / (2.0*e));'#10 +
+    '        // Globale Drift (Wind) damit die Wolke wandert'#10 +
+    '        vec3 drift = vec3(0.12, 0.02, -0.05);'#10 +
+    '        // Geschwindigkeit zuweisen und Position updaten'#10 +
+    '        vel = mix(vel, curl*1.5 + drift, 0.1);'#10 +
+    '        pos += vel*deltaTime*timeScale;'#10 +
+    '        // Bounding Box mit Wrap: Partikel die ausbrechen spawnen auf der Gegenseite'#10 +
+    '        float bounds = 1.4;'#10 +
+    '        if (pos.x > bounds) { pos.x = -bounds; pos.y = (fract(float(index)*0.13)*2.0-1.0)*0.5; }'#10 +
+    '        if (pos.x < -bounds) { pos.x = bounds; pos.y = (fract(float(index)*0.13)*2.0-1.0)*0.5; }'#10 +
+    '        if (pos.y > 0.8) pos.y = -0.2;'#10 +
+    '        if (pos.y < -0.4) pos.y = 0.6;'#10 +
+    '        if (pos.z > bounds) pos.z = -bounds;'#10 +
+    '        if (pos.z < -bounds) pos.z = bounds;'#10 +
     '    }'#10 +
+    '    // Emitter modes (12+) use colorIdx=100 to signal custom color to vertex shader.'#10 +
+    '    if (mode >= 12) colorIdx = 100.0;'#10 +
+    '    // Global forces (applied to ALL modes after per-type behavior)'#10 +
+    '    vel += globalWind * deltaTime;'#10 +
+    '    vel -= globalGravity * deltaTime;'#10 +
     '    if (pushActive != 0) {'#10 +
     '        vec3 toP = pos - pushPos; float d = length(toP);'#10 +
     '        if (d < pushRadius && d > 0.001) {'#10 +
@@ -497,6 +897,12 @@ const
     'layout (location=0) uniform mat4 projectionMatrix;'#10 +
     'layout (location=1) uniform mat4 viewMatrix;'#10 +
     'layout (location=2) uniform float particleScale;'#10 +
+    'layout (location=3) uniform float emColorR;'#10 +
+    'layout (location=4) uniform float emColorG;'#10 +
+    'layout (location=5) uniform float emColorB;'#10 +
+    'layout (location=6) uniform float emColorA;'#10 +
+    'layout (location=7) uniform float emSize;'#10 +
+    'layout (location=8) uniform float hdrMultiplier;'#10 +
     'layout(std430, binding=0) buffer ssbo0 { vec4 positions[]; };'#10 +
     'layout(std430, binding=1) buffer ssbo1 { vec4 velocities[]; };'#10 +
     'out vec4 fragColor;'#10 +
@@ -504,7 +910,10 @@ const
     '    vec3 velocity = velocities[gl_InstanceID].xyz;'#10 +
     '    vec4 posData = positions[gl_InstanceID];'#10 +
     '    vec3 position = posData.xyz; float ci = posData.w;'#10 +
-    '    if (ci > 0.5) {'#10 +
+    '    if (ci >= 100.0) {'#10 +
+    '        // Emitter mode: use custom color from uniforms (set by host)'#10 +
+    '        fragColor = vec4(emColorR, emColorG, emColorB, emColorA) * vec4(hdrMultiplier, hdrMultiplier, hdrMultiplier, 1.0);'#10 +
+    '    } else if (ci > 0.5) {'#10 +
     '        // Fixed colors: 1=sun(yellow) 2=stickman(blue) 3=housebody(brown) 4=roof(red) 5=trees(green) 6=street(gray) 7=flowers(pink) 8=ground(darkgreen)'#10 +
     '        if (ci<1.5) fragColor=vec4(1.0,0.8,0.0,1.0);'#10 +
     '        else if (ci<2.5) fragColor=vec4(0.2,0.5,1.0,1.0);'#10 +
@@ -517,7 +926,7 @@ const
     '    } else {'#10 +
     '        fragColor.rgb = abs(normalize(velocity)) + 0.2; fragColor.a = 1.0;'#10 +
     '    }'#10 +
-    '    float scale = 0.005*particleScale;'#10 +
+    '    float scale = (ci >= 100.0) ? 0.01*particleScale*emSize : 0.005*particleScale;'#10 +
     '    vec3 vertexView = vertexPosition*scale;'#10 +
     '    vec2 vv = (viewMatrix*vec4(velocity,0)).xy;'#10 +
     '    float va = atan(vv.y, vv.x); float sp = length(vv);'#10 +
@@ -558,6 +967,11 @@ begin
   FPushPos := Vector3Create(0, 0, 0); FPushRadius := 0.3; FPushStrength := 8.0;
   FPushActive := False;
   FGPUInitialized := False;
+  FEmColorR := 1.0; FEmColorG := 0.55; FEmColorB := 0.08; FEmColorA := 0.8;
+  FEmSize := 0.1;
+  FGlobalWind := Vector3Create(0, 0, 0);
+  FGlobalGravity := Vector3Create(0, 0, 0);
+  FHDRMultiplier := 1.0;
 end;
 
 destructor TYutaniParticleEngine.Destroy;
@@ -589,12 +1003,24 @@ begin
   FCompLoc_PushRadius := glGetUniformLocation(FComputeProgram, 'pushRadius');
   FCompLoc_PushStrength := glGetUniformLocation(FComputeProgram, 'pushStrength');
   FCompLoc_PushActive := glGetUniformLocation(FComputeProgram, 'pushActive');
+  FCompLoc_EmColorR := glGetUniformLocation(FComputeProgram, 'emColorR');
+  FCompLoc_EmColorG := glGetUniformLocation(FComputeProgram, 'emColorG');
+  FCompLoc_EmColorB := glGetUniformLocation(FComputeProgram, 'emColorB');
+  FCompLoc_EmColorA := glGetUniformLocation(FComputeProgram, 'emColorA');
+  FCompLoc_GlobalWind := glGetUniformLocation(FComputeProgram, 'globalWind');
+  FCompLoc_GlobalGravity := glGetUniformLocation(FComputeProgram, 'globalGravity');
   FRendLoc_ProjMatrix := glGetUniformLocation(FRenderProgram, 'projectionMatrix');
   FRendLoc_ViewMatrix := glGetUniformLocation(FRenderProgram, 'viewMatrix');
   FRendLoc_ParticleScale := glGetUniformLocation(FRenderProgram, 'particleScale');
+  FRendLoc_EmColorR := glGetUniformLocation(FRenderProgram, 'emColorR');
+  FRendLoc_EmColorG := glGetUniformLocation(FRenderProgram, 'emColorG');
+  FRendLoc_EmColorB := glGetUniformLocation(FRenderProgram, 'emColorB');
+  FRendLoc_EmColorA := glGetUniformLocation(FRenderProgram, 'emColorA');
+  FRendLoc_EmSize := glGetUniformLocation(FRenderProgram, 'emSize');
+  FRendLoc_HDRMultiplier := glGetUniformLocation(FRenderProgram, 'hdrMultiplier');
   SetLength(Positions, FNumParticles); SetLength(Velocities, FNumParticles);
   for I := 0 to FNumParticles - 1 do begin
-    Positions[I].x := -0.5+Random; Positions[I].y := -0.5+Random; Positions[I].z := -0.5+Random; Positions[I].w := 0;
+    Positions[I].x := -1.0+Random*2.0; Positions[I].y := -1.0+Random*2.0; Positions[I].z := -1.0+Random*2.0; Positions[I].w := 0;
     Velocities[I].x := 0; Velocities[I].y := 0; Velocities[I].z := 0; Velocities[I].w := 0;
   end;
   glGenBuffers(1, @FSSBO_Positions);
@@ -669,6 +1095,12 @@ begin
   glUniform1f(FCompLoc_PushRadius, FPushRadius);
   glUniform1f(FCompLoc_PushStrength, FPushStrength);
   if FPushActive then glUniform1i(FCompLoc_PushActive, 1) else glUniform1i(FCompLoc_PushActive, 0);
+  glUniform1f(FCompLoc_EmColorR, FEmColorR);
+  glUniform1f(FCompLoc_EmColorG, FEmColorG);
+  glUniform1f(FCompLoc_EmColorB, FEmColorB);
+  glUniform1f(FCompLoc_EmColorA, FEmColorA);
+  glUniform3f(FCompLoc_GlobalWind, FGlobalWind.x, FGlobalWind.y, FGlobalWind.z);
+  glUniform3f(FCompLoc_GlobalGravity, FGlobalGravity.x, FGlobalGravity.y, FGlobalGravity.z);
   GroupX := Cardinal(FNumParticles div 1024);
   glDispatchCompute(GroupX, 1, 1);
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -696,6 +1128,12 @@ begin
   glUniformMatrix4fv(FRendLoc_ProjMatrix, 1, GL_TRUE, @ProjMat);
   glUniformMatrix4fv(FRendLoc_ViewMatrix, 1, GL_TRUE, @ViewMat);
   glUniform1f(FRendLoc_ParticleScale, FParticleScale);
+  glUniform1f(FRendLoc_EmColorR, FEmColorR);
+  glUniform1f(FRendLoc_EmColorG, FEmColorG);
+  glUniform1f(FRendLoc_EmColorB, FEmColorB);
+  glUniform1f(FRendLoc_EmColorA, FEmColorA);
+  glUniform1f(FRendLoc_EmSize, FEmSize);
+  glUniform1f(FRendLoc_HDRMultiplier, FHDRMultiplier);
   glBindVertexArray(FBillboardVAO);
   glDrawArraysInstanced(GL_TRIANGLES, 0, 3, NumInstances);
   glBindVertexArray(0); glBindBuffer(GL_ARRAY_BUFFER, 0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
@@ -755,7 +1193,7 @@ end;
 procedure TYutaniParticleEngine.SetMode(AMode: Integer);
 begin
   if AMode < 0 then AMode := 0;
-  if AMode > 11 then AMode := 11;
+  if AMode > 59 then AMode := 59;
   FLock.Acquire;
   try
     FMode := AMode;
@@ -782,6 +1220,45 @@ procedure TYutaniParticleEngine.ClearPush;
 begin
   FLock.Acquire;
   try FPushActive := False;
+  finally FLock.Release; end;
+end;
+
+procedure TYutaniParticleEngine.SetEmColor(R, G, B, A: Single);
+begin
+  FLock.Acquire;
+  try
+    FEmColorR := R;
+    FEmColorG := G;
+    FEmColorB := B;
+    FEmColorA := A;
+  finally FLock.Release; end;
+end;
+
+procedure TYutaniParticleEngine.SetEmSize(S: Single);
+begin
+  FLock.Acquire;
+  try FEmSize := S;
+  finally FLock.Release; end;
+end;
+
+procedure TYutaniParticleEngine.SetGlobalWind(X, Y, Z: Single);
+begin
+  FLock.Acquire;
+  try FGlobalWind := Vector3Create(X, Y, Z);
+  finally FLock.Release; end;
+end;
+
+procedure TYutaniParticleEngine.SetGlobalGravity(X, Y, Z: Single);
+begin
+  FLock.Acquire;
+  try FGlobalGravity := Vector3Create(X, Y, Z);
+  finally FLock.Release; end;
+end;
+
+procedure TYutaniParticleEngine.SetHDRMultiplier(M: Single);
+begin
+  FLock.Acquire;
+  try FHDRMultiplier := M;
   finally FLock.Release; end;
 end;
 
