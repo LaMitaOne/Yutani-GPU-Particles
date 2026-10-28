@@ -31,7 +31,7 @@ Stickman Scene	3D diorama: sun, house with roof, trees, street, flowers, walking
  
     Smooth mode transitions — switching modes does not snap. Form modes use mix(pos, target, rate) to lerp particles from their current positions to the new pattern. Motion modes take over from current pos/vel directly.
     Mouse interaction — hold left mouse button in the render window to push nearby particles away from the cursor. Screen-to-world conversion is done manually via camera vectors (no GetMouseRay dependency).
-    Adjustable particle pool — trackbar from 1K to 5M particles in 1K steps. Engine recreates with the new pool size on the fly. Tested at 5M particles / 33 FPS on a Ryzen 4500U (Vega 6 iGPU).
+    Adjustable particle pool — trackbar from 1K to 5M particles in 1K steps. Engine recreates with the new pool size on the fly. Tested at 5M particles / 33 FPS on a Ryzen 4500U (Vega 6 iGPU) and 15,3million at 60fps on rtx2060s.
     Adjustable visible count — N x1000 slider controls how many of the pool are actually rendered (0–100%). Default is 1000 (all visible).
     Per-element coloring — Stickman Scene assigns each scene element a fixed color (sun=yellow, stickman=blue, house=brown, roof=red, trees=green, street=gray, flowers=pink, ground=dark green) stored in positions.w.
     Threaded Raylib rendering — Raylib runs in a background TThread, embedded as a child window inside a VCL TPanel. QPC-based frame pacing with hybrid Sleep(1)+spin-wait for exact FPS targeting.
