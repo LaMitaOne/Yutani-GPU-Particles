@@ -90,7 +90,34 @@ Mode Name   Description
 57	SparkTrail	Classic sparkler emission path tracking individual gravitational decay        
 58	MagicMissile	High-speed tracking projectile trace featuring a trailing spiral trail        
 59	Clouds	Advanced 3D Curl Noise fluidics simulation. Uses finite differences to solve a divergence-free velocity field, creating authentic volumetric gas swirls without clumping
-  
+      
+Folder RealisticGras contains:     
+
+Yutani.Render.Gras — GPU compute-shader grass renderer    
+- Derivative of Yutani.Render.Particles.GPU, grass only
+- Files: Yutani.Render.Gras.pas (engine), uGrasEngine.pas (threaded raylib wrapper), Unit1.pas/.dfm (VCL demo), GrasDemo.dpr
+- 500K blade default (combo: 250K / 500K / 1M / 2M)
+- PCG uint hash per blade (not sin(float(idx))) — no precision-stripes at 1M+
+- Quadratic Bezier curve per blade, 7-vertex GL_TRIANGLE_STRIP (was 15) — half the VS load
+- Lower blade half stays upright, only upper half bends — real grass look
+- Natural resting lean 10–25% of height in random XZ direction — no brush-head look
+- Wind: directional + travelling gust waves + per-blade oscillation + turbulence
+- Spring-back / inertia: compute shader reads prevBend from SSBO, asymmetric mix
+  fast push (~1/20s) / slow recovery (~1s) — visible trail in the grass after mouse
+- Mouse interaction: left button parts the grass, camera-ray → ground-plane intersect,
+  no GetMouseRay, soft quadratic falloff, maxBend lifted to 95% under cursor
+- Alpha blending OFF (blades opaque) — early-Z rejection, big iGPU bandwidth save
+- AO at blade foot (25% base color until t=0.3), width tapers quadratically to tip
+- All sliders live (no restart): field origin X/Y/Z, width/depth, height (Y), blade width,
+  wind strength/angle/gust, bend amount, push radius/strength, base/tip colors, color
+  variation, HDR
+- 2 vec4 per blade in positions SSBO (tip.xyz+bendNorm + bendDir.xy+bendDisp)
+- 1 vec4 per blade in bladeParams SSBO (heightFactor, phase, tint, unused)
+- Field origin/size/blade height are uniforms, base reconstructed from PCG hash —
+  live resize without buffer regeneration
+- No textures, no per-blade CPU state after Initialise
+- Manual camera: middle-mouse drag + wheel zoom
+
  
  
 Requirements
@@ -98,6 +125,10 @@ Requirements
      Delphi 10.3 Rio or newer (tested on Delphi 12 / dcc64)
      Raylib bindings for Delphi (ray4laz or equivalent)
      OpenGL 4.3+ capable GPU (compute shaders + SSBOs)
+
+
+
+     
 
 based on Raylib GPU Particles by arceryz    
    https://github.com/arceryz/raylib-gpu-particles                 
