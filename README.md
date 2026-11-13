@@ -94,6 +94,9 @@ Mode Name   Description
 Folder RealisticGras contains a try to tame that shader voodoo to let it make real gras and it looks not bad, is even touchable already.           
 
 Yutani.Render.Gras — GPU compute-shader grass renderer    
+     
+https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
+     
 <img width="415" height="340" alt="Unbenannt" src="https://github.com/user-attachments/assets/9c6e038b-387c-4260-a754-4d7bd6ce99a6" />
 
 - Derivative of Yutani.Render.Particles.GPU, grass only
