@@ -19,8 +19,7 @@
     - Directional wind + travelling gust waves + per-blade oscillation +
       small turbulence (gusts look natural, not uniform)
     - Fake ambient color shift: blades that bend further get a brighter
-      green (mimicking light catching the underside) - the "green changes
-      a little with the movement" effect requested for this engine
+      green (mimicking light catching the underside)
     - Field position (origin), width, depth, blade height, blade width,
       blade count, wind direction, wind strength, grass base/tip colors
       and color variation - all configurable from outside through simple
