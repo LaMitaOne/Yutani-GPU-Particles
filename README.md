@@ -91,9 +91,11 @@ Mode Name   Description
 58	MagicMissile	High-speed tracking projectile trace featuring a trailing spiral trail        
 59	Clouds	Advanced 3D Curl Noise fluidics simulation. Uses finite differences to solve a divergence-free velocity field, creating authentic volumetric gas swirls without clumping
       
-Folder RealisticGras contains:     
+Folder RealisticGras contains a try to tame that shader voodoo to let it make real gras and it looks not bad, is even touchable already.           
 
 Yutani.Render.Gras — GPU compute-shader grass renderer    
+<img width="415" height="340" alt="Unbenannt" src="https://github.com/user-attachments/assets/9c6e038b-387c-4260-a754-4d7bd6ce99a6" />
+
 - Derivative of Yutani.Render.Particles.GPU, grass only
 - Files: Yutani.Render.Gras.pas (engine), uGrasEngine.pas (threaded raylib wrapper), Unit1.pas/.dfm (VCL demo), GrasDemo.dpr
 - 500K blade default (combo: 250K / 500K / 1M / 2M)
