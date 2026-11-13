@@ -1,0 +1,15 @@
+object Form1: TForm1
+  Left = 0
+  Top = 0
+  Caption = 'Yutani Render Gras'
+  ClientHeight = 800
+  ClientWidth = 1380
+  Color = clBtnFace
+  Font.Charset = DEFAULT_CHARSET
+  Font.Color = clWindowText
+  Font.Height = -11
+  Font.Name = 'Tahoma'
+  Font.Style = []
+  OnCreate = FormCreate
+  TextHeight = 13
+end
