@@ -90,8 +90,10 @@ Mode Name   Description
 57	SparkTrail	Classic sparkler emission path tracking individual gravitational decay        
 58	MagicMissile	High-speed tracking projectile trace featuring a trailing spiral trail        
 59	Clouds	Advanced 3D Curl Noise fluidics simulation. Uses finite differences to solve a divergence-free velocity field, creating authentic volumetric gas swirls without clumping
+
+-----------------------------------------------------------------------------------------------                
       
-Folder RealisticGras contains a try to tame that shader voodoo to let it make real gras and it looks not bad, is even touchable already.           
+**Folder RealisticGras contains a try to tame that shader voodoo to let it make real gras and it looks not bad, is even touchable already.**           
 
 Yutani.Render.Gras — GPU compute-shader grass renderer    
      
@@ -131,7 +133,24 @@ https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
 - **Bug fixes:** `TGrasEngine.Reset` now immediately pushes default uniforms to the GPU, and cleaned up `rlgl` shader state restoration after instanced draw calls.      
 <img width="1364" height="962" alt="Unbenannt" src="https://github.com/user-attachments/assets/f36df217-766c-431c-87bd-b4375dc0fa95" />
 
-     
+-----------------------------------------------------------------------------------------------                
+       
+  **Folder MultiEmitter contains:**
+         
+  Slim, modular GPU compute-shader particle emitter engine.      
+  - 5 per-particle SSBOs (positions, velocities, colors, meta, targets)     
+  - 1 emitter SSBO (binding 6) with modular TEmitterData records (11 vec4 each)     
+  - Optional impacts ring buffer (binding 7) for rain/puddle system    
+  - Optional collider SSBO (binding 8) for physics bridge     
+  - Compute shader applies modular forces (gravity, drag, curl noise, vortex,
+    radial, floor) and over-lifetime curves (color, size, alpha). NO more
+    hardcoded etype if/else chains.     
+  - Vertex shader renders camera-facing quads (6 verts, UVs 0..1) with
+    optional motion-trail stretch.     
+  - Fragment shader supports optional 4x4 sprite atlas or procedural radial
+    gradient fallback.     
+
+       
       
 Requirements
 
