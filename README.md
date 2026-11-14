@@ -123,7 +123,7 @@ https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
 - No textures, no per-blade CPU state after Initialise
 - Manual camera: middle-mouse drag + wheel zoom
 
-### Grass Renderer Optimization Update      
+### Grass Renderer Optimization Update v0.2     
 - **Reduced SSBO bandwidth by ~66%:** Removed redundant `bladeParams` SSBO and compressed per-blade state down to a single `vec4` (`totalBend.xy`, `bendNorm`), reconstructing base positions and color tint procedurally via PCG uint hashing in the vertex shader.     
 - **5-vertex `GL_TRIANGLE_STRIP`:** Reduced blade geometry from 7 to 5 vertices while preserving the quadratic Bezier curve bend.     
 - **Vertex-level frustum culling & distance LOD:** Discards off-screen blades early in clip space and thins out distant blades (`w > 14.0`) with subtle width compensation to cut pixel overdraw.      
