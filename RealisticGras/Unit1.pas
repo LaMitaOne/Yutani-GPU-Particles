@@ -256,6 +256,11 @@ begin
   cbBladeCount.Items.Add('500.000');
   cbBladeCount.Items.Add('1.000.000');
   cbBladeCount.Items.Add('2.000.000');
+  cbBladeCount.Items.Add('5.000.000');
+  cbBladeCount.Items.Add('10.000.000');
+  cbBladeCount.Items.Add('20.000.000');
+  cbBladeCount.Items.Add('50.000.000');
+  cbBladeCount.Items.Add('100.000.000');
   cbBladeCount.ItemIndex := 1;  // 500K default - matches the engine's starting count
   cbBladeCount.SetBounds(CTRL_X, Y_BLADE_COUNT_CB, CTRL_W, 24);
   cbBladeCount.OnChange := OnBladeCountChange;
@@ -682,7 +687,7 @@ procedure TForm1.OnBladeCountChange(Sender: TObject);
   one with the new count, calls Initialise, and pushes all current
   parameter values. The thread is never killed, so no Raylib-window flash. }
 const
-  BladeCounts: array[0..3] of Integer = (250000, 500000, 1000000, 2000000);
+  BladeCounts: array[0..8] of Integer = (250000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000);
 var
   Idx, NewCount: Integer;
 begin
@@ -692,6 +697,7 @@ begin
   NewCount := BladeCounts[Idx];
   FEngine.RecreateEngine(NewCount);
 end;
+
 
 procedure TForm1.OnFieldWidthChange(Sender: TObject);
 begin
