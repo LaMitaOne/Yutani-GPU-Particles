@@ -99,7 +99,9 @@ Yutani.Render.Gras — GPU compute-shader grass renderer
      
 https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
      
-<img width="415" height="340" alt="Unbenannt" src="https://github.com/user-attachments/assets/9c6e038b-387c-4260-a754-4d7bd6ce99a6" />
+<img width="415" height="340" alt="Unbenannt" src="https://github.com/user-attachments/assets/9c6e038b-387c-4260-a754-4d7bd6ce99a6" />  
+
+Sample Video: https://youtu.be/hJ6nY6DWEu0     
 
 - Derivative of Yutani.Render.Particles.GPU, grass only
 - Files: Yutani.Render.Gras.pas (engine), uGrasEngine.pas (threaded raylib wrapper), Unit1.pas/.dfm (VCL demo), GrasDemo.dpr
