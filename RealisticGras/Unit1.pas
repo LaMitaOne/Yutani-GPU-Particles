@@ -1,5 +1,5 @@
 {*******************************************************************************
-  Yutani Render Gras Demo Form v0.1
+  Yutani Render Gras Demo Form v0.2
 ********************************************************************************
   Simple VCL form that drives the Yutani.Render.Gras GPU grass engine.
 

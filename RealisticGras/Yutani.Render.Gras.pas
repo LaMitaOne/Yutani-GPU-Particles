@@ -1,5 +1,5 @@
 {*******************************************************************************
-  Yutani.Render.Gras v0.1
+  Yutani.Render.Gras v0.2
 ********************************************************************************
   GPU compute-shader grass field renderer.
 
@@ -26,10 +26,14 @@
       setters, all live-editable at runtime (no buffer regeneration
       needed when only the uniforms change)
 
-  SSBO layout (matches the original Particles.GPU bindings where useful):
-    binding=0  positions     vec4   xyz = current tip world pos, w = bend
-    binding=1  bladeParams   vec4   x = height factor, y = phase, z = tint,
-                                   w = unused
+  SSBO layout (single buffer, half the bandwidth of the old 2-slot layout):
+    binding=0  positions     vec4   .xy = totalBend (horizontal XZ displacement),
+                                   .z  = bendNorm (bendDisp/maxBend, 0..1, color),
+                                   .w  = unused
+    (binding=1 bladeParams removed - all per-blade randoms now come from
+     pcgHash(uint(idx)) inside the shaders, so there is nothing for the CPU
+     to upload. At 500K blades this saves ~8 MB VRAM and ~16 MB/frame of
+     compute+read bandwidth.)
 
   The base (root) position of every blade is derived procedurally from
   the particle index in BOTH the compute and vertex shader via a stable
@@ -57,7 +61,10 @@ type
     FComputeProgram: Cardinal;
     FRenderProgram: Cardinal;
     FSSBO_Positions: Cardinal;
-    FSSBO_BladeParams: Cardinal;
+    { FSSBO_BladeParams removed: all per-blade randoms (u, v, heightFactor,
+      phase, leanDir, tint) are now derived in-shader from pcgHash(uint(idx)),
+      so there is nothing for the CPU to upload. Saves 1 vec4 per blade of VRAM
+      and one glBufferSubData upload per Recreate. }
     FBillboardVAO: Cardinal;
     FBillboardVBO: Cardinal;
     FNumParticles: Integer;
@@ -120,7 +127,8 @@ type
     procedure InitGPUResources;
     procedure FreeGPUResources;
     procedure BuildBillboardVAO;
-    procedure RegenerateBladeParams;
+    { RegenerateBladeParams removed - per-blade randoms now live in the
+      shaders via pcgHash, no CPU upload needed. }
     procedure DispatchCompute(const dt: Single);
     procedure DrawInstances(const NumInstances: Integer; const ACamera: TCamera3D; const ACamRight: TVector3);
   public
@@ -407,7 +415,6 @@ const
     '#version 430'#10 +
     'layout(local_size_x = 1024) in;'#10 +
     'layout(std430, binding=0) buffer ssbo0 { vec4 positions[]; };'#10 +
-    'layout(std430, binding=1) buffer ssbo1 { vec4 bladeParams[]; };'#10 +
     'uniform float time;'#10 +
     'uniform float deltaTime;'#10 +
     'uniform vec3 fieldOrigin;'#10 +
@@ -457,10 +464,6 @@ const
     '    vec2  leanDir      = vec2(bladeRand(index, 4u) * 2.0 - 1.0,'#10 +
     '                              bladeRand(index, 5u) * 2.0 - 1.0);'#10 +
     '    if (length(leanDir) > 0.001) leanDir = normalize(leanDir); else leanDir = vec2(1.0, 0.0);'#10 +
-    '    // bp.x is the height factor uploaded from CPU as a fallback. If the CPU never'#10 +
-    '    // uploaded bladeParams, bp.x is 0 - we ignore it and use the hash version above.'#10 +
-    '    vec4 bp = bladeParams[index];'#10 +
-    '    if (bp.x > 0.001) heightFactor = bp.x;'#10 +
     '    float height = heightFactor * bladeHeight;'#10 +
     '    // === Wind field ==='#10 +
     '    vec2 wind = windDir.xz * windStrength;'#10 +
@@ -507,16 +510,17 @@ const
     '        }'#10 +
     '    }'#10 +
     '    // === Spring-back / inertia ==='#10 +
-    '    // Read the previous frame bend vector from the SSBO so we can smooth'#10 +
-    '    // the bend over time. The mouse pushes blades down quickly, but when'#10 +
-    '    // the user releases the button (or moves the cursor away) the blades'#10 +
+    '    // Read the previous frame bend vector from the positions SSBO so we can'#10 +
+    '    // smooth the bend over time. The mouse pushes blades down quickly, but'#10 +
+    '    // when the user releases the button (or moves the cursor away) the blades'#10 +
     '    // should slowly spring back to their resting shape over ~1s, leaving a'#10 +
     '    // visible trail in the grass. Without this inertia the blades snap back'#10 +
     '    // in a single frame and the parting effect flickers.'#10 +
+    '    //   Layout note: positions[index] now packs totalBend.xy directly into'#10 +
+    '    //   .xy (was previously split across two vec4 slots: bendDir in slot 1'#10 +
+    '    //   .xz and bendDisp in slot 1 .w). One vec4 per blade = half the bandwidth.'#10 +
     '    if (deltaTime > 0.0) {'#10 +
-    '        uint  prevOutBase = index * 2u;'#10 +
-    '        vec4  prevBendData = positions[prevOutBase + 1u];'#10 +
-    '        vec2  prevBend = vec2(prevBendData.x, prevBendData.z) * prevBendData.w;'#10 +
+    '        vec2 prevBend = positions[index].xy;'#10 +
     '        // Asymmetric response: react fast when the new target bends further'#10 +
     '        // than the previous state (so the mouse pushes the grass down'#10 +
     '        // instantly), but slow when the grass is springing back up (so the'#10 +
@@ -533,30 +537,31 @@ const
     '        totalBend = totalBend * (maxBend / bendDisp);'#10 +
     '        bendDisp = maxBend;'#10 +
     '    }'#10 +
-    '    // Normalised bend direction (xz) for the vertex shader to use as the'#10 +
-    '    // control-point offset direction. Fall back to leanDir if totalBend is tiny.'#10 +
-    '    vec2 bendDirNorm;'#10 +
-    '    if (bendDisp > 0.001) bendDirNorm = totalBend / bendDisp;'#10 +
-    '    else                  bendDirNorm = leanDir;'#10 +
-    '    // Tip position: base + total horizontal bend + vertical drop from bend.'#10 +
-    '    // The droop scales with bendDisp so heavy bends curve the tip down.'#10 +
-    '    vec3 tip = base;'#10 +
-    '    tip.x += totalBend.x;'#10 +
-    '    tip.z += totalBend.y;'#10 +
-    '    tip.y  = base.y + height - bendDisp * 0.35;'#10 +
-    '    // Output: pack two vec4 per blade into the positions SSBO.'#10 +
-    '    //   [2*idx + 0]: vec4(tip.xyz, bendDisp_normalized)  - shader reads .xyz for tip, .w for color/light response (0..1)'#10 +
-    '    //   [2*idx + 1]: vec4(bendDirNorm.x, 0, bendDirNorm.y, bendDisp)  - vertex shader uses .xz as bend dir, .w as raw displacement for control-point placement'#10 +
-    '    uint outBase = index * 2u;'#10 +
-    '    positions[outBase + 0u] = vec4(tip, bendDisp / maxBend);'#10 +
-    '    positions[outBase + 1u] = vec4(bendDirNorm.x, 0.0, bendDirNorm.y, bendDisp);'#10 +
+    '    // Output: ONE vec4 per blade in the positions SSBO (was two).'#10 +
+    '    //   .xy = totalBend (horizontal XZ displacement of the tip from base)'#10 +
+    '    //   .z  = bendDisp / maxBend (normalised 0..1 bend progress, used for color)'#10 +
+    '    //   .w  = unused (kept for vec4 alignment)'#10 +
+    '    // The vertex shader reconstructs tip and bendDir from .xy directly:'#10 +
+    '    //   bendDisp = length(state.xy)'#10 +
+    '    //   tip      = base + vec3(state.x, height - bendDisp*0.35, state.y)'#10 +
+    '    //   control  = base + vec3(state.x*0.25, bladeHeight*0.65, state.y*0.25)'#10 +
+    '    // No bendDirNorm or tip computed here any more - saves the ALU and'#10 +
+    '    // the second SSBO write. At 500K blades this is ~8MB less VRAM and'#10 +
+    '    // ~16MB/frame less bandwidth on the compute dispatch + render read.'#10 +
+    '    positions[index] = vec4(totalBend.x, totalBend.y, bendDisp / maxBend, 0.0);'#10 +
     '}';
 
-  { Vertex shader: builds each blade as a CURVED strip of 5 triangles
-    (15 vertices per blade) using a quadratic Bezier curve from base to
-    tip. The control point is placed so the lower half of the blade stays
-    mostly upright and only the upper half bends - this matches how real
-    grass blades behave (rigid at the base, soft at the top).
+  { Vertex shader: builds each blade as a CURVED strip of 3 triangles
+    (5 vertices per blade via GL_TRIANGLE_STRIP) using a quadratic Bezier
+    curve from base to tip. The control point is placed so the lower half
+    of the blade stays mostly upright and only the upper half bends - this
+    matches how real grass blades behave (rigid at the base, soft at the top).
+
+    Reads ONE vec4 per blade from the positions SSBO (.xy=totalBend,
+    .z=bendNorm) and reconstructs tip + control point locally, so no
+    bladeParams SSBO is needed. Frustum-culls off-screen blades and
+    applies distance LOD (drop every other blade + widen survivors) past
+    w=14 in clip space.
 
     NO explicit layout(location=N) on uniforms - looked up via
     glGetUniformLocation in InitGPUResources. Some drivers mis-handle
@@ -577,7 +582,6 @@ const
     'uniform vec3 camRight;'#10 +
     'uniform float bladeHeight;'#10 +
     'layout(std430, binding=0) buffer ssbo0 { vec4 positions[]; };'#10 +
-    'layout(std430, binding=1) buffer ssbo1 { vec4 bladeParams[]; };'#10 +
     'out vec4 fragColor;'#10 +
     '// Same PCG hash as the compute shader - must produce IDENTICAL'#10 +
     '// values for the same (index, slot) so the vertex shader can'#10 +
@@ -594,17 +598,16 @@ const
     'void main() {'#10 +
     '    int idx = gl_InstanceID;'#10 +
     '    uint uidx = uint(idx);'#10 +
-    '    // Read compute-shader outputs: two vec4 per blade.'#10 +
-    '    int outBase = idx * 2;'#10 +
-    '    vec4 tipData  = positions[outBase + 0];'#10 +
-    '    vec4 bendData = positions[outBase + 1];'#10 +
-    '    vec3 tip       = tipData.xyz;'#10 +
-    '    float bendNorm = tipData.w;     // 0..1 normalised bend progress (for color)'#10 +
-    '    vec3 bendDir   = vec3(bendData.x, 0.0, bendData.z);  // unit horizontal bend dir'#10 +
-    '    float bendDisp = bendData.w;    // raw horizontal displacement (in world units)'#10 +
-    '    // Per-blade tint from bladeParams (uploaded by CPU). Fall back to hash if absent.'#10 +
-    '    vec4 bp = bladeParams[idx];'#10 +
-    '    float tint = (bp.z > 0.001) ? bp.z : bladeRand(uidx, 3u);'#10 +
+    '    // Read compute-shader output: ONE vec4 per blade (was two).'#10 +
+    '    //   .xy = totalBend (horizontal XZ displacement)'#10 +
+    '    //   .z  = bendNorm (0..1, for color)'#10 +
+    '    //   .w  = unused'#10 +
+    '    vec4 state     = positions[idx];'#10 +
+    '    vec2 totalBend = state.xy;'#10 +
+    '    float bendNorm = state.z;'#10 +
+    '    float bendDisp = length(totalBend);'#10 +
+    '    // Per-blade tint - now from hash directly (no more bladeParams SSBO).'#10 +
+    '    float tint = bladeRand(uidx, 3u);'#10 +
     '    // === Procedural base position - same hash as compute shader ==='#10 +
     '    float u = bladeRand(uidx, 0u);'#10 +
     '    float v = bladeRand(uidx, 1u);'#10 +
@@ -613,24 +616,56 @@ const
     '        fieldOrigin.y,'#10 +
     '        fieldOrigin.z + v * fieldSize.y'#10 +
     '    );'#10 +
+    '    // === Frustum culling + distance LOD ==='#10 +
+    '    // Compute the blade base in clip space and cull off-screen blades early'#10 +
+    '    // so the vertex shader does no Bezier/Bezier-side/color work for them.'#10 +
+    '    // The 1.35 margin on the x-extent covers the blade height (~2m) slop so'#10 +
+    '    // blades whose base is just off-screen but whose tip would be visible'#10 +
+    '    // are NOT culled. Anything outside this test is sent to (2,2,2) which is'#10 +
+    '    // outside clip space, so the rasterizer discards it for free.'#10 +
+    '    vec4 clipBase = projectionMatrix * viewMatrix * vec4(base, 1.0);'#10 +
+    '    if (clipBase.w < -1.0 || abs(clipBase.x) > clipBase.w * 1.35) {'#10 +
+    '        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);'#10 +
+    '        return;'#10 +
+    '    }'#10 +
+    '    // Distance LOD: blades farther than w=14 (roughly the back of a 20x20 patch'#10 +
+    '    // from the default camera) get thinned by 50% - every other blade is dropped,'#10 +
+    '    // and the survivors get bladeWidth*1.6 so the field still reads as dense from'#10 +
+    '    // far away. This halves pixel overdraw in the distance where it matters most'#10 +
+    '    // for fill rate on integrated GPUs.'#10 +
+    '    float localBladeWidth = bladeWidth;'#10 +
+    '    if (clipBase.w > 14.0) {'#10 +
+    '        if ((idx & 1) == 1) {'#10 +
+    '            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);'#10 +
+    '            return;'#10 +
+    '        }'#10 +
+    '        localBladeWidth *= 1.6;'#10 +
+    '    }'#10 +
+    '    // Per-blade height (same formula as compute shader) - needed because we'#10 +
+    '    // now reconstruct tip here instead of reading it from the SSBO.'#10 +
+    '    float heightFactor = 0.7 + bladeRand(uidx, 2u) * 0.6;'#10 +
+    '    float height = heightFactor * bladeHeight;'#10 +
+    '    // Reconstruct tip from totalBend + per-blade height (was written by the'#10 +
+    '    // compute shader before; now computed here to save the SSBO slot).'#10 +
+    '    vec3 tip = base + vec3(totalBend.x, height - bendDisp * 0.35, totalBend.y);'#10 +
     '    // Per-vertex: vertexPosition.x = t (0..1 along blade), vertexPosition.y = side (-1/0/+1).'#10 +
     '    float tParam = vertexPosition.x;'#10 +
     '    float side   = vertexPosition.y;'#10 +
     '    // === Bezier control point ==='#10 +
-    '    // The control point sits at 65% of the blade height and is pushed'#10 +
-    '    // in the bend direction by 25% of the actual horizontal displacement.'#10 +
-    '    // This makes the LOWER half of the blade stay mostly upright while'#10 +
-    '    // only the UPPER half bends over - matching real grass behavior.'#10 +
-    '    vec3 control = base + vec3(bendDir.x * bendDisp * 0.25,'#10 +
+    '    // Same as before: lower half of blade stays upright, upper half bends.'#10 +
+    '    // bendDir * bendDisp = totalBend (when bendDisp > 0), so we use totalBend'#10 +
+    '    // directly - no need to normalize then multiply back. When bendDisp is'#10 +
+    '    // ~0 the contribution collapses to ~0 anyway, matching the old fallback.'#10 +
+    '    vec3 control = base + vec3(totalBend.x * 0.25,'#10 +
     '                              bladeHeight * 0.65,'#10 +
-    '                              bendDir.z * bendDisp * 0.25);'#10 +
+    '                              totalBend.y * 0.25);'#10 +
     '    // Quadratic Bezier: P(t) = (1-t)^2 * base + 2*(1-t)*t * control + t^2 * tip'#10 +
     '    float omt = 1.0 - tParam;'#10 +
     '    vec3 center = omt*omt*base + 2.0*omt*tParam*control + tParam*tParam*tip;'#10 +
     '    // Side offset: blade width tapers quadratically to the tip so the tip'#10 +
     '    // is a sharp point. widthScale goes from 1.0 at the base to ~0.06 at the tip.'#10 +
     '    float widthScale = pow(1.0 - tParam, 0.8);'#10 +
-    '    vec3 worldPos = center + camRight * side * bladeWidth * 0.5 * widthScale;'#10 +
+    '    vec3 worldPos = center + camRight * side * localBladeWidth * 0.5 * widthScale;'#10 +
     '    // === Color ==='#10 +
     '    // Base color: lerp from base color (root) to tip color (top), with per-blade tint variation.'#10 +
     '    vec3 col = mix(grassColorBase, grassColorTip, tParam + tint * colorVariation);'#10 +
@@ -656,32 +691,32 @@ const
        t    = 0..1 along the blade (0 = root, 1 = tip)
        side = -1 (left edge), +1 (right edge), 0 (centerline, used at tip)
 
-    7 vertices produce 5 triangles via GL_TRIANGLE_STRIP, which is a more
-    compact representation than the previous 15-vertex GL_TRIANGLES layout:
-    each strip triangle reuses 2 vertices from the previous one, so the
-    vertex shader runs only 7 times per blade instead of 15 - a 2x reduction
-    in vertex shader invocations on a 1M-blade field. The Bezier curve
-    shape is preserved because we still sample 4 unique t values along
-    the blade (0.0, 0.45, 0.80, 1.0); the smaller number of segments only
-    makes the silhouette slightly more polygonal, which is invisible at
-    grass-blade scale.
+    5 vertices produce 3 triangles via GL_TRIANGLE_STRIP. Progression of
+    optimizations on this stream:
+       15 verts GL_TRIANGLES  (5 separate tris)
+        7 verts GL_TRIANGLE_STRIP (5 strip tris, 4 unique t values)
+        5 verts GL_TRIANGLE_STRIP (3 strip tris, 3 unique t values: 0.0,
+           0.52, 1.0)
+
+    The quadratic Bezier curve in the vertex shader (mix(mix(base, control,
+    t), mix(control, tip, t), t)) keeps the blade silhouette almost
+    identically rounded even with only 2 segments - the polygonal kink at
+    t=0.52 is sub-pixel at grass-blade scale and camera distance. Each
+    strip triangle reuses 2 vertices from the previous one, so the vertex
+    shader runs only 5 times per blade.
 
     Strip winding (counter-clockwise front-facing):
        strip tri 0: (v0, v1, v2)
        strip tri 1: (v1, v2, v3) [wound as (v2, v1, v3) by the strip]
        strip tri 2: (v2, v3, v4)
-       strip tri 3: (v3, v4, v5)
-       strip tri 4: (v4, v5, v6)
     The driver swaps winding on every other triangle, which GL_TRIANGLE_STRIP
-    does automatically, so all 5 tris face the camera correctly. }
-  BLADE_VERTS: array[0..6] of TVector3 = (
+    does automatically, so all 3 tris face the camera correctly. }
+  BLADE_VERTS: array[0..4] of TVector3 = (
     (x: 0.00; y: -1.0; z: 0.0),  // v0: base-left
     (x: 0.00; y:  1.0; z: 0.0),  // v1: base-right
-    (x: 0.45; y: -1.0; z: 0.0),  // v2: mid-left
-    (x: 0.45; y:  1.0; z: 0.0),  // v3: mid-right
-    (x: 0.80; y: -1.0; z: 0.0),  // v4: upper-left
-    (x: 0.80; y:  1.0; z: 0.0),  // v5: upper-right
-    (x: 1.00; y:  0.0; z: 0.0)); // v6: tip (centerline, side=0)
+    (x: 0.52; y: -1.0; z: 0.0),  // v2: mid-left
+    (x: 0.52; y:  1.0; z: 0.0),  // v3: mid-right
+    (x: 1.00; y:  0.0; z: 0.0)); // v4: tip (centerline, side=0)
 
 { ========================================================================== }
 { TYutaniGrassEngine                                                         }
@@ -695,7 +730,7 @@ begin
   // Round up to a multiple of 1024 (compute shader workgroup size).
   FNumParticles := ((ANumParticles + 1023) div 1024) * 1024;
   FComputeProgram := 0; FRenderProgram := 0;
-  FSSBO_Positions := 0; FSSBO_BladeParams := 0;
+  FSSBO_Positions := 0;
   FBillboardVAO := 0; FBillboardVBO := 0;
   FTime := 0.0;
   FGPUInitialized := False;
@@ -793,31 +828,26 @@ begin
   FRendLoc_CamRight       := glGetUniformLocation(FRenderProgram, 'camRight');
   FRendLoc_BladeHeight   := glGetUniformLocation(FRenderProgram, 'bladeHeight');
   // Positions SSBO: zero-initialised, the compute shader fills it on the
-  // first dispatch. TWO vec4 per blade (one for tip.xyz+bendAmt, one for
-  // bendDir.xy+bendProgress) - so allocate 2 * FNumParticles entries.
-  SetLength(Positions, 2 * FNumParticles);
-  for I := 0 to (2 * FNumParticles) - 1 do begin
+  // first dispatch. ONE vec4 per blade (.xy = totalBend, .z = bendNorm, .w = 0).
+  // Was 2 vec4 per blade (tip.xyz+bendAmt + bendDir.xy+bendProgress); we cut
+  // it in half by having the vertex shader reconstruct tip from totalBend +
+  // per-blade height (also hashed), and drop the separate bendDir slot by
+  // deriving direction from totalBend directly. At 500K blades this saves
+  // ~8 MB of VRAM and ~16 MB/frame of bandwidth on the dispatch+readback.
+  SetLength(Positions, FNumParticles);
+  for I := 0 to FNumParticles - 1 do begin
     Positions[I].x := 0; Positions[I].y := 0;
     Positions[I].z := 0; Positions[I].w := 0;
   end;
   glGenBuffers(1, @FSSBO_Positions);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, FSSBO_Positions);
-  glBufferData(GL_SHADER_STORAGE_BUFFER, 2 * FNumParticles * SizeOf(TVector4), @Positions[0], GL_DYNAMIC_COPY);
-  // BladeParams SSBO: per-blade random height/phase/tint, uploaded once.
-  glGenBuffers(1, @FSSBO_BladeParams);
-  glBindBuffer(GL_SHADER_STORAGE_BUFFER, FSSBO_BladeParams);
-  glBufferData(GL_SHADER_STORAGE_BUFFER, FNumParticles*SizeOf(TVector4), nil, GL_DYNAMIC_DRAW);
+  glBufferData(GL_SHADER_STORAGE_BUFFER, FNumParticles * SizeOf(TVector4), @Positions[0], GL_DYNAMIC_COPY);
   glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
   BuildBillboardVAO;
-  // CRITICAL: set FGPUInitialized = True BEFORE calling RegenerateBladeParams.
-  // RegenerateBladeParams guards on FSSBO_BladeParams (the buffer must exist)
-  // and uploads random per-blade height/phase/tint. Without this data,
-  // every blade has bp.x = 0 in the compute shader, so height = 0 and every
-  // tip collapses to base.y (= 0). Result: the entire field renders flat on
-  // the ground, no matter what the Height slider is set to. This was the
-  // "everything is flat, nothing reacts to anything" bug.
+  // FGPUInitialized must be set before the first Update() call so that
+  // DispatchCompute actually runs. There is no RegenerateBladeParams step
+  // any more - all per-blade randoms are derived in-shader from pcgHash.
   FGPUInitialized := True;
-  RegenerateBladeParams;
 end;
 
 procedure TYutaniGrassEngine.FreeGPUResources;
@@ -826,11 +856,10 @@ begin
   if (FComputeProgram <> 0) and Assigned(glDeleteProgram) then glDeleteProgram(FComputeProgram);
   if (FRenderProgram <> 0) and Assigned(glDeleteProgram) then glDeleteProgram(FRenderProgram);
   if FSSBO_Positions   <> 0 then glDeleteBuffers(1, @FSSBO_Positions);
-  if FSSBO_BladeParams  <> 0 then glDeleteBuffers(1, @FSSBO_BladeParams);
   if FBillboardVBO      <> 0 then glDeleteBuffers(1, @FBillboardVBO);
   if FBillboardVAO      <> 0 then glDeleteVertexArrays(1, @FBillboardVAO);
   FComputeProgram := 0; FRenderProgram := 0;
-  FSSBO_Positions := 0; FSSBO_BladeParams := 0;
+  FSSBO_Positions := 0;
   FBillboardVAO := 0; FBillboardVBO := 0;
   FGPUInitialized := False;
 end;
@@ -847,50 +876,6 @@ begin
     glEnableVertexAttribArray(0);
   finally
     glBindVertexArray(0);
-  end;
-end;
-
-procedure TYutaniGrassEngine.RegenerateBladeParams;
-var
-  Params: array of TVector4;
-  I: Integer;
-begin
-  // Guard on the buffer, not on FGPUInitialized - this method is called from
-  // InitGPUResources where FGPUInitialized has just been set to True, and
-  // also from outside (any future caller). The check that matters is "do we
-  // have a buffer to upload to".
-  if FSSBO_BladeParams = 0 then Exit;
-  SetLength(Params, FNumParticles);
-  for I := 0 to FNumParticles - 1 do begin
-    // x = per-blade height factor (0.7..1.3) - multiplied by bladeHeight
-    //   uniform in the shader, so changing bladeHeight at runtime resizes
-    //   all blades smoothly without regenerating this buffer.
-    Params[I].x := 0.7 + Random * 0.6;
-    // y = per-blade phase (0..1) - multiplied by 2*PI in the shader so each
-    //   blade sways at its own timing.
-    Params[I].y := Random;
-    // z = per-blade tint (0..1) - drives color variation around the base
-    //   grass color.
-    Params[I].z := Random;
-    // w = unused (kept for vec4 alignment)
-    Params[I].w := 0.0;
-  end;
-  FLock.Acquire;
-  try
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, FSSBO_BladeParams);
-    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0,
-      FNumParticles * SizeOf(TVector4), @Params[0]);
-    glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
-    // Diagnostic trace so the user can verify in the debugger output
-    // window that this method actually ran and uploaded N particles.
-    // Before this fix, RegenerateBladeParams silently exited because
-    // FGPUInitialized was still False when it was called from
-    // InitGPUResources, leaving the entire buffer as zeros.
-    OutputDebugStringA(PAnsiChar(AnsiString(Format(
-      'Yutani.Render.Gras: RegenerateBladeParams uploaded %d blade params (first: h=%.2f phase=%.2f tint=%.2f)',
-      [FNumParticles, Params[0].x, Params[0].y, Params[0].z]))));
-  finally
-    FLock.Release;
   end;
 end;
 
@@ -921,7 +906,6 @@ begin
   rlSetShader(rlGetShaderIdDefault(), rlGetShaderLocsDefault());
   glUseProgram(FComputeProgram);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, FSSBO_Positions);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, FSSBO_BladeParams);
   glUniform1f(FCompLoc_Time,          FTime);
   glUniform1f(FCompLoc_DeltaTime,     dt);
   glUniform3f(FCompLoc_FieldOrigin,   FFieldOrigin.x, FFieldOrigin.y, FFieldOrigin.z);
@@ -946,7 +930,6 @@ begin
   glDispatchCompute(GroupX, 1, 1);
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
   glUseProgram(0);
   rlSetShader(rlGetShaderIdDefault(), rlGetShaderLocsDefault());
   glErr := glGetError();
@@ -973,7 +956,6 @@ begin
   glDisable(GL_BLEND);
   glUseProgram(FRenderProgram);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, FSSBO_Positions);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, FSSBO_BladeParams);
   glUniformMatrix4fv(FRendLoc_ProjMatrix, 1, GL_TRUE, @ProjMat);
   glUniformMatrix4fv(FRendLoc_ViewMatrix, 1, GL_TRUE, @ViewMat);
   glUniform1f(FRendLoc_BladeWidth,      FBladeWidth);
@@ -986,21 +968,21 @@ begin
   glUniform3f(FRendLoc_CamRight,         ACamRight.x,   ACamRight.y,   ACamRight.z);
   glUniform1f(FRendLoc_BladeHeight,      FBladeHeight);
   glBindVertexArray(FBillboardVAO);
-  // PERFORMANCE: 7 vertices per blade via GL_TRIANGLE_STRIP (was 15 via
-  // GL_TRIANGLES). GL_TRIANGLE_STRIP reuses 2 of every 3 vertices across
-  // consecutive triangles, so we draw 5 triangles with only 7 vertex
-  // shader invocations instead of 15 - a 2x reduction in vertex shader
-  // load at the same visual fidelity.
-  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 7, NumInstances);
+  // PERFORMANCE: 5 vertices per blade via GL_TRIANGLE_STRIP. Was 7, was 15
+  // before that. With the quadratic Bezier curve (mix(mix(base, control, t),
+  // mix(control, tip, t), t)) we still sample 3 unique t values (0.0, 0.52,
+  // 1.0) so the curve stays almost identically rounded - the silhouette is
+  // only very slightly more polygonal, invisible at grass-blade scale - but
+  // the vertex shader now runs only 5 times per blade instead of 7, another
+  // ~30% reduction on top of the 7->15 cut.
+  glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 5, NumInstances);
   glBindVertexArray(0);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
   glUseProgram(0);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, 0);
-  rlSetShader(FRenderProgram, rlGetShaderLocsDefault());
   rlSetShader(rlGetShaderIdDefault(), rlGetShaderLocsDefault());
   // GL_BLEND was already disabled above - leave it disabled for the next
   // pass (we don't want to re-enable it just to have someone else disable

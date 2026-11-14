@@ -564,6 +564,12 @@ begin
   FDesiredPushStrength :=   2.5;
   if Assigned(FGrass) then
     FGrass.Reset;
+  // Push the freshly-reset desired values live to the engine. Without this,
+  // Reset only updates the FDesiredXxx fields and the engine keeps rendering
+  // with whatever was pushed last - so clicking Reset had no visible effect
+  // until the user touched another slider. PushDesiredValuesToEngine forwards
+  // every FDesiredXxx to the matching FGrass.SetXxx in one shot.
+  PushDesiredValuesToEngine;
 end;
 
 { ============================================================================
