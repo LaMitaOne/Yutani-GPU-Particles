@@ -129,6 +129,8 @@ https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
 - **Vertex-level frustum culling & distance LOD:** Discards off-screen blades early in clip space and thins out distant blades (`w > 14.0`) with subtle width compensation to cut pixel overdraw.      
 - **performance boost:** Increased frame rate on Ryzen 4500U (Vega 6 iGPU) from ~12 FPS up to 22–25++ FPS at 500K blades, in some cam positions even 60fps stable. 20 million @ 5fps but...yea thats maybe a bit much for igpu :D     
 - **Bug fixes:** `TGrasEngine.Reset` now immediately pushes default uniforms to the GPU, and cleaned up `rlgl` shader state restoration after instanced draw calls.      
+<img width="1364" height="962" alt="Unbenannt" src="https://github.com/user-attachments/assets/f36df217-766c-431c-87bd-b4375dc0fa95" />
+
      
       
 Requirements
