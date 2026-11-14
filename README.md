@@ -148,9 +148,10 @@ https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
   - Vertex shader renders camera-facing quads (6 verts, UVs 0..1) with
     optional motion-trail stretch.     
   - Fragment shader supports optional 4x4 sprite atlas or procedural radial
-    gradient fallback.     
-
-       
+    gradient fallback.
+      
+<img width="1263" height="792" alt="Unbenannt" src="https://github.com/user-attachments/assets/3a8f92d5-1a67-4325-a07e-967ab83df318" />
+              
       
 Requirements
 
