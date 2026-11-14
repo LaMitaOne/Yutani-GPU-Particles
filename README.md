@@ -123,17 +123,20 @@ https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
 - No textures, no per-blade CPU state after Initialise
 - Manual camera: middle-mouse drag + wheel zoom
 
- 
- 
+### Grass Renderer Optimization Update      
+- **Reduced SSBO bandwidth by ~66%:** Removed redundant `bladeParams` SSBO and compressed per-blade state down to a single `vec4` (`totalBend.xy`, `bendNorm`), reconstructing base positions and color tint procedurally via PCG uint hashing in the vertex shader.     
+- **5-vertex `GL_TRIANGLE_STRIP`:** Reduced blade geometry from 7 to 5 vertices while preserving the quadratic Bezier curve bend.     
+- **Vertex-level frustum culling & distance LOD:** Discards off-screen blades early in clip space and thins out distant blades (`w > 14.0`) with subtle width compensation to cut pixel overdraw.      
+- **performance boost:** Increased frame rate on Ryzen 4500U (Vega 6 iGPU) from ~12 FPS up to 22–25 FPS at 500K blades.      
+- **Bug fixes:** `TGrasEngine.Reset` now immediately pushes default uniforms to the GPU, and cleaned up `rlgl` shader state restoration after instanced draw calls.      
+     
+      
 Requirements
 
      Delphi 10.3 Rio or newer (tested on Delphi 12 / dcc64)
      Raylib bindings for Delphi (ray4laz or equivalent)
      OpenGL 4.3+ capable GPU (compute shaders + SSBOs)
-
-
-
-     
+         
 
 based on Raylib GPU Particles by arceryz    
    https://github.com/arceryz/raylib-gpu-particles                 
