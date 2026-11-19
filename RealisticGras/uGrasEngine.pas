@@ -14,8 +14,9 @@
     - No mode switching, no emitter spawning - grass only.
     - No mouse push interaction - grass does not react to clicks.
     - No Lorenz/sigma/rho/beta/instancesX1000 controls - irrelevant for grass.
-    - Camera defaults are tuned for a 20x20 ground patch instead of the
-      (-1,1) particle demo volume.
+    - Camera defaults are tuned for a 60x60 ground patch (was 20x20 before
+      the non-linear height + wilt pass) instead of the (-1,1) particle
+      demo volume.
 
   Author: Lara Miriam Tamy Reschke / LamitaOne
 *******************************************************************************}
@@ -188,23 +189,27 @@ begin
   FHeight := 800;
   FGrass := nil;
 
-  // Camera tuned for a 20x20 ground patch with 2m-tall blades: closer
-  // and lower than the original (15,9,15) so the grass fills the frame
-  // and individual blades are visible, not sub-pixel.
-  FCamera.position := Vector3Create(12.0, 4.0, 12.0);
-  FCamera.target := Vector3Create(0.0, 0.5, 0.0);
+  // Camera tuned for a 60x60 ground patch with up to 4m-tall blades (the
+  // pow(h3,3) skew pushes the top ~20% of blades up to 2x bladeHeight).
+  // Pulled back and raised so the whole field is in frame and the tall
+  // outlier blades read against the horizon instead of clipping out the top.
+  FCamera.position := Vector3Create(35.0, 9.0, 35.0);
+  FCamera.target := Vector3Create(0.0, 1.5, 0.0);
   FCamera.up := Vector3Create(0, 1, 0);
   FCamera.fovy := 50.0;
   FCamera.projection := CAMERA_PERSPECTIVE;
 
   // Default grass configuration - mirrors the engine's own defaults so the
-  // first rendered frame is already a complete 20x20 grass field with a
+  // first rendered frame is already a complete 60x60 grass field with a
   // gentle breeze. The VCL form can override any of these.
-  FDesiredFieldOriginX  := -10.0;
+  // Field widened from 20x20 to 60x60: same blade count (DEFAULT_BLADE_COUNT
+  // = 500K) spread over 9x the area, so blades have room around them and an
+  // avatar / vehicle can plough a long way through tall grass.
+  FDesiredFieldOriginX  := -30.0;
   FDesiredFieldOriginY  :=   0.0;
-  FDesiredFieldOriginZ  := -10.0;
-  FDesiredFieldWidth    :=  20.0;
-  FDesiredFieldDepth    :=  20.0;
+  FDesiredFieldOriginZ  := -30.0;
+  FDesiredFieldWidth    :=  60.0;
+  FDesiredFieldDepth    :=  60.0;
   FDesiredBladeHeight   :=   2.0;
   FDesiredBladeWidth    :=   0.06;
   FDesiredWindDirX      :=   1.0;
@@ -236,8 +241,8 @@ begin
   FCamPitch := 0.35;   // ~20 degrees down - flatter angle so we see the
                        // individual blades against the ground, not just
                        // a top-down sea of green.
-  FCamDist  := 16.0;  // distance to target - tight enough that the
-                       // 20x20 patch + 2m blades fill the view.
+  FCamDist  := 42.0;  // distance to target - pulled back from 16 to 42 so
+                       // the 60x60 patch + tall outlier blades fit the view.
 end;
 
 destructor TGrasEngine.Destroy;
@@ -538,11 +543,12 @@ end;
 procedure TGrasEngine.Reset;
 begin
   // Reset desired values to the engine defaults AND push them live.
-  FDesiredFieldOriginX  := -10.0;
+  // Field widened to 60x60 to match the engine default.
+  FDesiredFieldOriginX  := -30.0;
   FDesiredFieldOriginY  :=   0.0;
-  FDesiredFieldOriginZ  := -10.0;
-  FDesiredFieldWidth    :=  20.0;
-  FDesiredFieldDepth    :=  20.0;
+  FDesiredFieldOriginZ  := -30.0;
+  FDesiredFieldWidth    :=  60.0;
+  FDesiredFieldDepth    :=  60.0;
   FDesiredBladeHeight   :=   2.0;
   FDesiredBladeWidth    :=   0.06;
   FDesiredWindDirX      :=   1.0;
