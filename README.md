@@ -99,7 +99,7 @@ Yutani.Render.Gras — GPU compute-shader grass renderer
      
 https://github.com/user-attachments/assets/fe109e08-b673-44bc-9b8d-01782e5bddc8
      
-<img width="415" height="340" alt="Unbenannt" src="https://github.com/user-attachments/assets/9c6e038b-387c-4260-a754-4d7bd6ce99a6" />  
+<img width="1359" height="958" alt="Unbenannt" src="https://github.com/user-attachments/assets/d00651f1-ec9b-412b-9bc1-d6cebb65b38b" />
 
 Sample Video: https://youtu.be/hJ6nY6DWEu0     
 
@@ -144,8 +144,6 @@ Improved Performance from ~25fps on ryzen4500 to ~35+
 - **performance boost:** Increased frame rate on Ryzen 4500U (Vega 6 iGPU) from ~12 FPS up to 22–25++ FPS at 500K blades, in some cam positions even 60fps stable. 20 million @ 5fps but...yea thats maybe a bit much for igpu :D couldnt resist and tried it even on asus ux305ca with intel m3 fanless and he does 3-5fps oO at 500k particles (14fps @ 250k p)...and survived again           
 - **Bug fixes:** `TGrasEngine.Reset` now immediately pushes default uniforms to the GPU, and cleaned up `rlgl` shader state restoration after instanced draw calls.
            
-<img width="1364" height="962" alt="Unbenannt" src="https://github.com/user-attachments/assets/f36df217-766c-431c-87bd-b4375dc0fa95" />
-
 -----------------------------------------------------------------------------------------------                
        
   **Folder MultiEmitter contains:**
