@@ -132,7 +132,6 @@ Added: non-linear grass length distribution (most blades short, ~20% tall outlie
 Added: wilting tint on tall blades (ochre/straw-green at upper tips)        
 Added: bend proportional to blade length (short blades stay straight)        
 Added: random ± jitter on blade tip height for natural variation        
-Changed: grass field default 20×20 → 60×60        
 Changed: camera pulled back (pos 35,9,35 / dist 42) to fit larger field        
 Added: static GLSL checker script (bracket balance, Pascal leak, compute/vertex parity)        
 Improved Performance from ~25fps on ryzen4500 to ~35+                     
